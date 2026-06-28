@@ -4,24 +4,26 @@ import React, { useState, useEffect, useMemo } from 'react';
 // 默认日志数据与版本历史 (不写死，方便后续维护追溯)
 // ==========================================
 const SYSTEM_LOGS = [
+  { version: "v1.2.0", date: "2026-06-28", desc: "新增无服务器本地多账户登录系统。支持新设备首登凭 URL 快捷绑定，引入新设备首登强制下载机制（安全锁防空白覆盖）。" },
   { version: "v1.1.0", date: "2026-06-28", desc: "导入机制升级。新增 CSV/TSV 智能分隔符识别，支持 Excel 复制内容一键直接粘帖，强化无表头及缺省字段自适应填充。" },
   { version: "v1.0.0", date: "2026-06-28", desc: "消防CRM基础版本上线。支持首页四大开单工具、SKU管理、客户管理、全模块原生数据导入导出以及带安全锁的Google Sheet云备份系统。" }
 ];
 
 export default function App() {
   // ==========================================
-  // 1. 全局数据持久化初始化
+  // 1. 本地账户库与当前登录用户状态
   // ==========================================
-  const [skus, setSkus] = useState(() => JSON.parse(localStorage.getItem('crm_skus') || '[]'));
-  const [customers, setCustomers] = useState(() => JSON.parse(localStorage.getItem('crm_customers') || '[]'));
-  
-  // 基础设置与安全云同步状态
-  const [profile, setProfile] = useState(() => JSON.parse(localStorage.getItem('crm_profile') || JSON.stringify({
-    username: '消防管理员',
-    sheetUrl: '',
-    hasSynced: false // 云同步安全锁：新设备初始需强制下载一次，避免空数据覆盖云端
-  })));
+  const [accounts, setAccounts] = useState(() => JSON.parse(localStorage.getItem('crm_accounts') || '{}'));
+  const [currentUsername, setCurrentUsername] = useState(() => localStorage.getItem('crm_current_user') || '');
 
+  // 登录/注册表单临时状态
+  const [authForm, setAuthForm] = useState({ username: '', password: '', sheetUrl: '', isNewDevice: false });
+
+  // 根据当前登录用户，动态隔离载入其专属的商品与客户数据
+  const [skus, setSkus] = useState([]);
+  const [customers, setCustomers] = useState([]);
+
+  // 导航与弹窗状态
   const [activeTab, setActiveTab] = useState('home'); // home | products | customers | profile
   const [currentModal, setCurrentModal] = useState(null); // sales | quote | contract-general | contract-special
 
@@ -32,26 +34,114 @@ export default function App() {
   // 提示信息通知
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
-  // 自动持久化本地缓存钩子
+  // 3. 当登录用户切换时，重新从 localStorage 加载其对应的数据
   useEffect(() => {
-    localStorage.setItem('crm_skus', JSON.stringify(skus));
-  }, [skus]);
+    if (currentUsername) {
+      const savedSkus = localStorage.getItem(`crm_skus_${currentUsername}`) || '[]';
+      const savedCustomers = localStorage.getItem(`crm_customers_${currentUsername}`) || '[]';
+      setSkus(JSON.parse(savedSkus));
+      setCustomers(JSON.parse(savedCustomers));
+    } else {
+      setSkus([]);
+      setCustomers([]);
+    }
+  }, [currentUsername]);
+
+  // 4. 数据变动时自动持久化至对应账户的独立沙盒中
+  useEffect(() => {
+    if (currentUsername) {
+      localStorage.setItem(`crm_skus_${currentUsername}`, JSON.stringify(skus));
+    }
+  }, [skus, currentUsername]);
 
   useEffect(() => {
-    localStorage.setItem('crm_customers', JSON.stringify(customers));
-  }, [customers]);
-
-  useEffect(() => {
-    localStorage.setItem('crm_profile', JSON.stringify(profile));
-  }, [profile]);
+    if (currentUsername) {
+      localStorage.setItem(`crm_customers_${currentUsername}`, JSON.stringify(customers));
+    }
+  }, [customers, currentUsername]);
 
   const triggerToast = (msg, type = 'success') => {
     setToast({ show: true, message: msg, type });
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
   };
 
+  // 当前激活的账户配置信息 (若无，提供空安全垫)
+  const currentAccount = accounts[currentUsername] || { sheetUrl: '', hasSynced: false };
+
   // ==========================================
-  // 2. 原生表格 CSV 数据导出
+  // 5. 本地登录与注册逻辑
+  // ==========================================
+  const handleAuthSubmit = (e) => {
+    e.preventDefault();
+    const u = authForm.username.trim();
+    const p = authForm.password.trim();
+    const url = authForm.sheetUrl.trim();
+
+    if (!u || !p) {
+      triggerToast('请输入用户名和密码', 'error');
+      return;
+    }
+
+    const existingAcc = accounts[u];
+
+    if (authForm.isNewDevice) {
+      // 首次登录新设备 或 注册新本地账户
+      setAccounts(prev => {
+        const updated = {
+          ...prev,
+          [u]: {
+            password: p,       // 本地验证密码
+            sheetUrl: url,     // 记住绑定的云备份URL
+            hasSynced: false   // 强制开启新设备同步安全锁 [1]
+          }
+        };
+        localStorage.setItem('crm_accounts', JSON.stringify(updated));
+        return updated;
+      });
+      setCurrentUsername(u);
+      localStorage.setItem('crm_current_user', u);
+      setAuthForm({ username: '', password: '', sheetUrl: '', isNewDevice: false });
+      triggerToast(`本地账户 ${u} 激活成功。安全锁已启用，请先下载云端备份！`);
+    } else {
+      // 快捷登录当前设备上已有的账户
+      if (!existingAcc) {
+        triggerToast('当前设备未检测到该账户。若为新设备，请勾选“首次登录新设备”选项', 'error');
+        return;
+      }
+      if (existingAcc.password !== p) {
+        triggerToast('密码校验失败，请输入正确的本地密码', 'error');
+        return;
+      }
+      setCurrentUsername(u);
+      localStorage.setItem('crm_current_user', u);
+      triggerToast(`欢迎回来，${u}！`);
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUsername('');
+    localStorage.removeItem('crm_current_user');
+    triggerToast('已安全退出登录');
+  };
+
+  const handleUpdateSheetUrl = (newUrl) => {
+    setAccounts(prev => {
+      const updated = {
+        ...prev,
+        [currentUsername]: {
+          ...prev[currentUsername],
+          sheetUrl: newUrl,
+          hasSynced: false // 更改 URL 时重置同步锁，安全起见需重新下拉一次
+        }
+      };
+      localStorage.setItem('crm_accounts', JSON.stringify(updated));
+      return updated;
+    });
+    triggerToast('云备份 URL 配置已更新，安全锁已重置。');
+  };
+
+  // ==========================================
+  // 6. 原生表格 CSV 数据导出
   // ==========================================
   const exportDataToCSV = (filename, headers, rows) => {
     const csvContent = "\ufeff" + [
@@ -69,21 +159,18 @@ export default function App() {
   };
 
   // ==========================================
-  // 3. 智能 CSV/TSV 导入模块 (支持一键粘帖 Excel 与最简数据)
+  // 7. 智能 CSV/TSV 导入模块
   // ==========================================
   const handleCSVImport = (text, type) => {
-    // 将输入按行拆分，过滤掉空行
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length === 0) {
       triggerToast('未检测到有效数据', 'error');
       return;
     }
 
-    // 智能识别分隔符：支持 逗号(,)、制表符(\\t - Excel默认复制格式)、分号(;)、竖线(|)
     const separators = [',', '\\t', ';', '|'];
     let bestSep = ',';
     let maxCount = -1;
-    // 拿前3行进行高频分隔符测试
     const testLines = lines.slice(0, 3);
     separators.forEach(sep => {
       let count = 0;
@@ -97,11 +184,9 @@ export default function App() {
       }
     });
 
-    // 通用行切分与去引号清洗函数
     const parseLine = (line) => {
       return line.split(bestSep).map(c => {
         let cleaned = c.trim();
-        // 清洗可能包裹在字段外侧的单双引号
         if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || 
             (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
           cleaned = cleaned.substring(1, cleaned.length - 1);
@@ -113,15 +198,9 @@ export default function App() {
     const parsedLines = lines.map(parseLine);
     const firstLine = parsedLines[0];
 
-    // ==========================================
-    // 规则 A：商品 SKU 智能导入
-    // ==========================================
     if (type === 'sku') {
-      // 智能推断第一行是否为表头
       const skuKeywords = ['名', 'sku', '商品', '品名', '价格', '单价', '进价', '金额', '进货价', '品牌', '单位', '备注', 'name', 'price', 'brand', 'unit', 'remarks'];
       let hasHeader = firstLine.some(cell => skuKeywords.some(keyword => cell.toLowerCase().includes(keyword)));
-      
-      // 安全校正：如果第一行第二列能直接解析为非零数值，说明很可能是无表头的数据行，强制判定为无表头
       if (firstLine[1] !== undefined && !isNaN(parseFloat(firstLine[1])) && isFinite(firstLine[1])) {
         hasHeader = false;
       }
@@ -131,7 +210,6 @@ export default function App() {
 
       if (hasHeader) {
         dataLines = parsedLines.slice(1);
-        // 根据表头文字自适应映射列索引
         firstLine.forEach((cell, idx) => {
           const val = cell.toLowerCase();
           if (val.includes('名') || val.includes('sku') || val.includes('name')) colMap.name = idx;
@@ -141,7 +219,6 @@ export default function App() {
           else if (val.includes('备') || val.includes('注') || val.includes('remark')) colMap.remarks = idx;
         });
       } else {
-        // 无表头时智能猜测：寻找第一行里第一个能转化为有效数字的列作为价格列
         let priceIdx = -1;
         for (let i = 0; i < firstLine.length; i++) {
           const num = parseFloat(firstLine[i]);
@@ -152,12 +229,11 @@ export default function App() {
         }
         if (priceIdx !== -1) {
           colMap.price = priceIdx;
-          colMap.name = priceIdx === 0 ? 1 : 0; // 若第0列就是价格，则第1列作为名称；否则默认第0列为名称
+          colMap.name = priceIdx === 0 ? 1 : 0;
         } else {
           colMap.name = 0;
-          colMap.price = 1; // 备用降级策略：第0列名称，第1列价格
+          colMap.price = 1;
         }
-        // 猜测其余可能存在的属性列
         let remaining = [];
         for (let i = 0; i < firstLine.length; i++) {
           if (i !== colMap.name && i !== colMap.price) remaining.push(i);
@@ -170,12 +246,10 @@ export default function App() {
       const newSkus = [];
       dataLines.forEach(cols => {
         const name = cols[colMap.name];
-        if (!name || name.trim() === '') return; // 必须拥有名称，否则丢弃空行
+        if (!name || name.trim() === '') return;
 
         const priceVal = colMap.price !== -1 ? cols[colMap.price] : '';
         const price = parseFloat(priceVal) || 0;
-
-        // 宽容模式：若品牌、单位为空，赋予默认业务初始值
         const brand = (colMap.brand !== -1 && cols[colMap.brand]) ? cols[colMap.brand] : '通用';
         const unit = (colMap.unit !== -1 && cols[colMap.unit]) ? cols[colMap.unit] : '个';
         const remarks = (colMap.remarks !== -1 && cols[colMap.remarks]) ? cols[colMap.remarks] : '';
@@ -192,16 +266,9 @@ export default function App() {
 
       setSkus(prev => [...prev, ...newSkus]);
       triggerToast(`成功导入 ${newSkus.length} 条消防物资`);
-    }
-
-    // ==========================================
-    // 规则 B：客户名单智能导入
-    // ==========================================
-    else if (type === 'customer') {
+    } else if (type === 'customer') {
       const custKeywords = ['名', '公司', '客户', '单位', '税', '地', '址', '联系', '人', '账', '行', '电', '话', '手机', 'customer', 'company', 'name', 'tax', 'address', 'phone'];
       let hasHeader = firstLine.some(cell => custKeywords.some(keyword => cell.toLowerCase().includes(keyword)));
-
-      // 手机号安全校正：如果发现首行含有11位连续数字（很可能是电话），则强制认为这是无表头的首行数据
       if (firstLine.some(cell => /^\d{11}$/.test(cell))) {
         hasHeader = false;
       }
@@ -224,25 +291,15 @@ export default function App() {
           else if (val.includes('电') || val.includes('话') || val.includes('手机') || val.includes('phone') || val.includes('tel')) colMap.phone = idx;
         });
       } else {
-        // 无表头猜测：默认第 0 列为客户名称
         colMap.name = 0;
         colMap.company = 0;
-
-        // 根据长度与内容特征智能匹配其余列
         for (let i = 1; i < firstLine.length; i++) {
           const val = firstLine[i];
-          if (/^\d{11}$/.test(val) || (/^\d+-\d+$/.test(val))) {
-            colMap.phone = i; // 11位数字或带横杠的判定为电话
-          } else if (val.length >= 15 && val.length <= 20 && /^[a-zA-Z0-9]+$/.test(val)) {
-            colMap.taxId = i; // 15-20位纯英文数字判定为纳税号
-          } else if (val.includes('省') || val.includes('市') || val.includes('区') || val.includes('路') || val.includes('号')) {
-            colMap.address = i; // 地址识别
-          } else if (val.length >= 2 && val.length <= 4) {
-            colMap.contact = i; // 2-4个字的判定为联系人姓名
-          }
+          if (/^\d{11}$/.test(val) || (/^\d+-\d+$/.test(val))) colMap.phone = i;
+          else if (val.length >= 15 && val.length <= 20 && /^[a-zA-Z0-9]+$/.test(val)) colMap.taxId = i;
+          else if (val.includes('省') || val.includes('市') || val.includes('区') || val.includes('路') || val.includes('号')) colMap.address = i;
+          else if (val.length >= 2 && val.length <= 4) colMap.contact = i;
         }
-
-        // 把没有被特殊识别的闲置列分配给银行/账号
         let assigned = Object.values(colMap).filter(v => v !== -1);
         let unassigned = [];
         for (let i = 0; i < firstLine.length; i++) {
@@ -277,63 +334,82 @@ export default function App() {
   };
 
   // ==========================================
-  // 4. Google Sheet 云安全同步模块 (双向防覆盖机制)
+  // 8. Google Sheet 云安全同步模块 (双向防覆盖机制)
   // ==========================================
   const handleCloudBackup = async (action) => {
-    if (!profile.sheetUrl) {
-      triggerToast('请先在“我的”页面配置云备份URL', 'error');
+    const sheetUrl = currentAccount.sheetUrl;
+    if (!sheetUrl) {
+      triggerToast('请先在下方配置云备份URL', 'error');
       return;
     }
 
-    if (action === 'upload' && !profile.hasSynced) {
-      triggerToast('⚠️ 新设备安全警告：请先执行下载备份，防止本地空白数据覆盖云端！', 'error');
+    if (action === 'upload' && !currentAccount.hasSynced) {
+      triggerToast('⚠️ 安全警告：新设备未先拉取云端数据，本地上传已锁定！', 'error');
       return;
     }
 
     try {
       if (action === 'upload') {
         const payload = { skus, customers };
-        await fetch(profile.sheetUrl, {
+        await fetch(sheetUrl, {
           method: 'POST',
-          mode: 'no-cors', // 适配谷歌Apps Script无源跨域
+          mode: 'no-cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'upload', payload })
         });
-        triggerToast('本地数据已备份到云端（请确认Apps Script端无误）');
+        triggerToast('本地数据已安全推送到云端备份！');
       } else if (action === 'download') {
-        const res = await fetch(profile.sheetUrl);
+        const res = await fetch(sheetUrl);
         const result = await res.json();
         if (result.success && result.data) {
           const cloudData = result.data;
-          if (cloudData.skus) setSkus(cloudData.skus);
-          if (cloudData.customers) setCustomers(cloudData.customers);
-          setProfile(prev => ({ ...prev, hasSynced: true }));
-          triggerToast('云端数据下载并恢复成功！已为您解除安全限制。');
+          
+          if (cloudData.skus) {
+            setSkus(cloudData.skus);
+            localStorage.setItem(`crm_skus_${currentUsername}`, JSON.stringify(cloudData.skus));
+          }
+          if (cloudData.customers) {
+            setCustomers(cloudData.customers);
+            localStorage.setItem(`crm_customers_${currentUsername}`, JSON.stringify(cloudData.customers));
+          }
+          
+          // 标志置为 true，解除本地上传的锁
+          setAccounts(prev => {
+            const updated = {
+              ...prev,
+              [currentUsername]: {
+                ...prev[currentUsername],
+                hasSynced: true
+              }
+            };
+            localStorage.setItem('crm_accounts', JSON.stringify(updated));
+            return updated;
+          });
+          triggerToast('云端备份已成功下载并恢复至本地！同步锁已解除。');
         } else {
-          triggerToast('云端尚无历史备份，已为您激活首次备份权限！');
-          setProfile(prev => ({ ...prev, hasSynced: true }));
+          // 云端无数据，说明是完全干净的云表格，允许解锁首次写入
+          setAccounts(prev => {
+            const updated = {
+              ...prev,
+              [currentUsername]: {
+                ...prev[currentUsername],
+                hasSynced: true
+              }
+            };
+            localStorage.setItem('crm_accounts', JSON.stringify(updated));
+            return updated;
+          });
+          triggerToast('云端表格为空，已为您激活并解锁首次云备份权限！');
         }
       }
     } catch (e) {
-      triggerToast('同步失败，请检查脚本URL、网络或CORS限制', 'error');
+      triggerToast('同步连接超时，请核对云 URL、网络或 CORS 限制', 'error');
     }
   };
 
   // ==========================================
-  // 5. 子模块局部视图临时状态
+  // 9. 多级单据自动处理关联
   // ==========================================
-  const [editingSku, setEditingSku] = useState(null);
-  const [isAddingSku, setIsAddingSku] = useState(false);
-  const [skuForm, setSkuForm] = useState({ name: '', purchasePrice: '', brand: '', unit: '', remarks: '' });
-  const [bulkInputType, setBulkInputType] = useState(null); // 'sku' | 'customer'
-  const [bulkText, setBulkText] = useState('');
-
-  const [editingCustomer, setEditingCustomer] = useState(null);
-  const [isAddingCustomer, setIsAddingCustomer] = useState(false);
-  const [customerForm, setCustomerForm] = useState({ name: '', company: '', taxId: '', address: '', contact: '', account: '', bank: '', phone: '' });
-  const [viewingExclusivePrice, setViewingExclusivePrice] = useState(null);
-
-  // 快捷生成销售单/合同所关联的元数据
   const [docMeta, setDocMeta] = useState({
     ourCompany: '中国消防设备服务有限公司',
     selectedCustomerId: '',
@@ -345,7 +421,6 @@ export default function App() {
     items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]
   });
 
-  // 智能化关联：选择商品名称时，自适应匹配其品牌、单位及针对该客商的专属报价或默认采购价 [2]
   const updateDocItemSku = (index, skuName) => {
     const foundSku = skus.find(s => s.name === skuName);
     const selectedCust = customers.find(c => c.id === docMeta.selectedCustomerId);
@@ -376,7 +451,6 @@ export default function App() {
     setDocMeta({ ...docMeta, items: updatedItems });
   };
 
-  // 销售单保存事件：自动反向补全未登记 SKU 且绑定为专属客户价格
   const saveFormAndTriggerUpdates = () => {
     if (!docMeta.selectedCustomerId) {
       triggerToast('请选择客户后再保存', 'error');
@@ -391,20 +465,18 @@ export default function App() {
       if (!item.skuName.trim()) return;
       let foundSku = updatedSkus.find(s => s.name.trim() === item.skuName.trim());
       
-      // 1. 如果商品库不存在该商品，自动补录
       if (!foundSku) {
         foundSku = {
           id: 'sku_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
           name: item.skuName.trim(),
-          purchasePrice: 0, // 自动新增的 SKU 进货底价初始化默认为 0
+          purchasePrice: 0,
           brand: item.brand || '自动生成',
           unit: item.unit || '个',
-          remarks: '由销售开单模块反向同步补齐'
+          remarks: '由开单反向同步补齐'
         };
         updatedSkus.push(foundSku);
       }
 
-      // 2. 绑定当前设置单价为该特定客户的“专属销售价格”
       updatedCustomers = updatedCustomers.map(c => {
         if (c.id === targetCust.id) {
           return {
@@ -425,6 +497,7 @@ export default function App() {
     triggerToast('销售单保存成功，缺失的商品及客商专属价格已反向同步更新！');
   };
 
+  // 模糊检索筛选器
   const filteredSkus = useMemo(() => {
     return skus.filter(s => s.name.toLowerCase().includes(productSearch.toLowerCase()) || (s.brand && s.brand.toLowerCase().includes(productSearch.toLowerCase())));
   }, [skus, productSearch]);
@@ -433,30 +506,124 @@ export default function App() {
     return customers.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.contact && c.contact.toLowerCase().includes(customerSearch.toLowerCase())));
   }, [customers, customerSearch]);
 
+  // ==========================================
+  // VIEW: 登录 / 注册隔离门户
+  // ==========================================
+  if (!currentUsername) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col justify-center p-6 font-sans">
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 space-y-6">
+          <div className="text-center space-y-2">
+            <span className="text-5xl">🧯</span>
+            <h1 className="text-2xl font-black tracking-wider text-slate-800">消防CRM系统</h1>
+            <p className="text-xs text-slate-400">无远程空间存储 · 纯本地沙盒与谷歌云同步</p>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-500">本地账户用户名</label>
+              <input
+                type="text"
+                required
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="例如: admin"
+                value={authForm.username}
+                onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-500">本地账户密码</label>
+              <input
+                type="password"
+                required
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="输入设备校验密码"
+                value={authForm.password}
+                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+              />
+            </div>
+
+            {/* 新设备首登切换 */}
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-700">首次登录新设备 / 注册新账户</span>
+                <span className="text-[10px] text-slate-400">开启后可在此绑定您的 Google Sheet URL</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500"
+                checked={authForm.isNewDevice}
+                onChange={(e) => setAuthForm({ ...authForm, isNewDevice: e.target.checked })}
+              />
+            </div>
+
+            {authForm.isNewDevice && (
+              <div className="space-y-1 animate-fade-in">
+                <label className="text-xs font-bold text-red-600">关联 Google Sheet Web App URL (选填)</label>
+                <input
+                  type="password"
+                  className="w-full px-4 py-2.5 rounded-xl border border-red-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-red-50/30"
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  value={authForm.sheetUrl}
+                  onChange={(e) => setAuthForm({ ...authForm, sheetUrl: e.target.value })}
+                />
+                <p className="text-[10px] text-slate-400 leading-normal pt-1 pl-1">
+                  💡 输入后，系统会自动在新设备上建立此账户索引。为了保障云端安全，<strong>登录后必须在“我的”页面先点击一次【下载并恢复云端】才能解锁上传</strong>，防范空白数据覆盖！
+                </p>
+              </div>
+            )}
+
+            <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-red-100 transition-all active:scale-98">
+              {authForm.isNewDevice ? '注册并绑定激活账户' : '安全验证并登入'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // VIEW: 正常业务主工作区
+  // ==========================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col shadow-xl relative pb-20 font-sans">
       
-      {/* 1. 顶部状态栏 */}
+      {/* 顶部通栏 */}
       <header className="bg-red-600 text-white p-4 sticky top-0 z-40 flex justify-between items-center shadow-md">
         <h1 className="text-lg font-bold tracking-wider">🧯 消防安全CRM系统</h1>
-        <span className="text-xs bg-red-700 px-2.5 py-1 rounded-full border border-red-500">本地持久</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] bg-red-700 px-2 py-0.5 rounded border border-red-500 max-w-[80px] truncate">
+            👤 {currentUsername}
+          </span>
+        </div>
       </header>
 
-      {/* Toast 通用通知 */}
+      {/* 核心Toast通知 */}
       {toast.show && (
         <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm text-white font-medium animate-bounce ${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
           {toast.message}
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* VIEW 1: 首页 TAB */}
-      {/* ======================================================== */}
+      {/* ==========================================
+          TAB 1: 首页 (包含快捷表单、合同)
+          ========================================== */}
       {activeTab === 'home' && (
         <div className="p-4 space-y-6 flex-1">
+          {/* 新设备安全警告条 (如果未做首次下载备份) [1] */}
+          {currentAccount.sheetUrl && !currentAccount.hasSynced && (
+            <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl text-xs text-amber-800 space-y-1.5 shadow-sm">
+              <div className="font-bold flex items-center gap-1">⚠️ 新设备数据安全锁已启用</div>
+              <p className="text-[10px] opacity-90 leading-relaxed">
+                当前检测到您在新设备登录。为防止本地空沙盒意外覆盖谷歌云端历史备份，<strong>【备份到云端】功能已被临时安全锁闭</strong>。请立即前往“我的”页面点击<strong>【下载并恢复云端】</strong>完成同步初始化！
+              </p>
+            </div>
+          )}
+
           <div className="bg-gradient-to-br from-red-500 to-orange-600 rounded-2xl p-5 text-white shadow-lg relative overflow-hidden">
             <h2 className="text-xl font-bold mb-1">今日快捷开单系统</h2>
-            <p className="text-xs opacity-90 mb-4">保存开单时，系统将智能提取并反向填充缺失的 SKU 商品属性</p>
+            <p className="text-xs opacity-90 mb-4">保存开单时，系统将智能提取并反向填充缺失的 SKU 商品属性与专属定价</p>
             <div className="flex gap-4 text-center">
               <div className="flex-1 bg-white/10 rounded-xl p-2.5 backdrop-blur-sm">
                 <div className="text-lg font-semibold">{skus.length}</div>
@@ -496,9 +663,9 @@ export default function App() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* VIEW 2: 商品 TAB */}
-      {/* ======================================================== */}
+      {/* ==========================================
+          TAB 2: 商品页
+          ========================================== */}
       {activeTab === 'products' && (
         <div className="p-4 flex-1 space-y-4">
           <input
@@ -545,9 +712,9 @@ export default function App() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* VIEW 3: 客户 TAB */}
-      {/* ======================================================== */}
+      {/* ==========================================
+          TAB 3: 客户页
+          ========================================== */}
       {activeTab === 'customers' && (
         <div className="p-4 flex-1 space-y-4">
           <input
@@ -594,38 +761,42 @@ export default function App() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* VIEW 4: 我的 TAB (安全同步、维护日志) */}
-      {/* ======================================================== */}
+      {/* ==========================================
+          TAB 4: 我的页 (安全同步、退出)
+          ========================================== */}
       {activeTab === 'profile' && (
         <div className="p-4 flex-1 space-y-6">
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm text-center">
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm text-center relative">
+            <button onClick={handleLogout} className="absolute top-4 right-4 text-xs text-red-600 bg-red-50 hover:bg-red-100 py-1 px-2.5 rounded-lg font-medium">
+              退出登录
+            </button>
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <span className="text-3xl">⚙️</span>
             </div>
-            <h3 className="font-bold text-slate-800 text-base">{profile.username}</h3>
-            <p className="text-xs text-slate-400 mt-1">本地安全运行模式</p>
+            <h3 className="font-bold text-slate-800 text-base">{currentUsername}</h3>
+            <p className="text-xs text-slate-400 mt-1">本地沙箱运行 · 账号专属库</p>
           </div>
 
+          {/* 云备份配置 (带安全锁功能) [1] */}
           <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-4">
             <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-              <span>☁️</span> Google Sheets 备份配置
+              <span>☁️</span> Google Sheets 云备份中心
             </h4>
             
             <div className="space-y-1">
               <label className="text-xs text-slate-500">Google Apps Script Web App URL</label>
               <input
                 type="password"
-                placeholder="https://script.google.com/macros/s/.../exec"
+                placeholder="未绑定 / 请粘贴备份URL并修改"
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-1 focus:ring-red-500"
-                value={profile.sheetUrl}
-                onChange={(e) => setProfile({ ...profile, sheetUrl: e.target.value, hasSynced: false })}
+                value={currentAccount.sheetUrl || ''}
+                onChange={(e) => handleUpdateSheetUrl(e.target.value)}
               />
             </div>
 
-            {profile.sheetUrl && !profile.hasSynced && (
+            {currentAccount.sheetUrl && !currentAccount.hasSynced && (
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 leading-relaxed">
-                ⚠️ <strong>安全提示：</strong> 检测到新的云端链路。为防止本地空数据覆盖并损毁云备份，<strong>本地推送功能现已锁定</strong>。请必须先执行 <strong>下载并恢复云端</strong>。
+                ⚠️ <strong>新设备安全警告：</strong> 当前账号尚未执行数据初始化拉取。为保护您云端可能存在的历史数据不被本地空数据清空，<strong>【备份到云端】已被禁用。请立即先点击【下载并恢复云端】 [1]！</strong>
               </div>
             )}
 
@@ -637,10 +808,10 @@ export default function App() {
                 📥 下载并恢复云端
               </button>
               <button
-                disabled={profile.sheetUrl !== "" && !profile.hasSynced}
+                disabled={currentAccount.sheetUrl !== "" && !currentAccount.hasSynced}
                 onClick={() => handleCloudBackup('upload')}
                 className={`py-2 px-3 rounded-lg text-xs font-semibold shadow-sm text-white ${
-                  profile.sheetUrl !== "" && !profile.hasSynced
+                  (currentAccount.sheetUrl !== "" && !currentAccount.hasSynced)
                     ? 'bg-slate-300 cursor-not-allowed'
                     : 'bg-emerald-600 hover:bg-emerald-700'
                 }`}
@@ -650,6 +821,7 @@ export default function App() {
             </div>
           </div>
 
+          {/* 系统更新日志 */}
           <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm space-y-3">
             <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
               <span>📝</span> 系统更新/维护日志
@@ -670,7 +842,7 @@ export default function App() {
       )}
 
       {/* ======================================================== */}
-      {/* 弹窗及抽屉：CSV 批量解析 & 添加商品/客商 */}
+      {/* 全局业务弹窗：CSV批量解析 & 单体 SKU 与客户增改 */}
       {/* ======================================================== */}
 
       {bulkInputType && (
@@ -701,7 +873,7 @@ export default function App() {
         </div>
       )}
 
-      {/* SKU 增加及编辑 */}
+      {/* SKU 增加与编辑 */}
       {(isAddingSku || editingSku) && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4">
@@ -765,9 +937,7 @@ export default function App() {
       {viewingExclusivePrice && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 flex flex-col max-h-[85vh]">
-            <h3 className="font-bold text-slate-800 text-sm">
-              🔑 {viewingExclusivePrice.name} - 专属货品价格
-            </h3>
+            <h3 className="font-bold text-slate-800 text-sm">🔑 {viewingExclusivePrice.name} - 专属货品价格</h3>
             <div className="flex-1 overflow-y-auto space-y-3">
               {skus.map(s => {
                 const isCustom = viewingExclusivePrice.exclusivePrices[s.id] !== undefined;
@@ -785,10 +955,7 @@ export default function App() {
                           const val = parseFloat(e.target.value) || 0;
                           const updated = customers.map(c => {
                             if (c.id === viewingExclusivePrice.id) {
-                              return {
-                                ...c,
-                                exclusivePrices: { ...c.exclusivePrices, [s.id]: val }
-                              };
+                              return { ...c, exclusivePrices: { ...c.exclusivePrices, [s.id]: val } };
                             }
                             return c;
                           });
@@ -801,9 +968,7 @@ export default function App() {
                 );
               })}
             </div>
-            <button onClick={() => setViewingExclusivePrice(null)} className="w-full bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold">
-              确认关闭
-            </button>
+            <button onClick={() => setViewingExclusivePrice(null)} className="w-full bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold">确认关闭</button>
           </div>
         </div>
       )}
@@ -833,9 +998,7 @@ export default function App() {
               <button onClick={() => {
                 const updatedItems = [...docMeta.items, { skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }];
                 setDocMeta({...docMeta, items: updatedItems});
-              }} className="bg-red-600 text-white py-1 px-3 rounded text-[10px]">
-                + 添加新物料行
-              </button>
+              }} className="bg-red-600 text-white py-1 px-3 rounded text-[10px]">+ 添加新物料行</button>
               <div className="flex gap-2">
                 <button onClick={() => setCurrentModal(null)} className="bg-slate-300 px-3 py-1 rounded text-[10px]">退出预览</button>
                 <button onClick={saveFormAndTriggerUpdates} className="bg-emerald-600 text-white px-3 py-1 rounded text-[10px]">确认存单并同步</button>
@@ -844,10 +1007,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 实时单据图版 */}
           <div className="flex-1 border p-6 bg-white shadow-inner text-slate-900 rounded-lg max-w-4xl mx-auto w-full">
-            
-            {/* 销售单展示 */}
             {currentModal === 'sales' && (
               <div className="space-y-6">
                 <div className="text-center">
@@ -872,9 +1032,7 @@ export default function App() {
                   <tbody>
                     {docMeta.items.map((item, idx) => (
                       <tr key={idx} className="border-b">
-                        <td className="p-1">
-                          <input type="text" className="w-full bg-slate-50 border-0 focus:bg-white" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} placeholder="输入或选填" />
-                        </td>
+                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 focus:bg-white" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
                         <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
                         <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 w-10" value={item.unit} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
                         <td className="p-1"><input type="number" className="w-full bg-slate-50 border-0 text-center w-12" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
@@ -884,13 +1042,10 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
-                <div className="text-right font-bold text-sm">
-                  合计总额: ¥{docMeta.items.reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}
-                </div>
+                <div className="text-right font-bold text-sm">合计总额: ¥{docMeta.items.reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
               </div>
             )}
 
-            {/* 报价单展示 */}
             {currentModal === 'quote' && (
               <div className="space-y-6">
                 <div className="text-center border-b-2 border-red-600 pb-3">
@@ -916,52 +1071,28 @@ export default function App() {
                   <tbody>
                     {docMeta.items.map((item, idx) => (
                       <tr key={idx} className="border-b">
-                        <td className="p-2 border-r">
-                          <input type="text" className="w-full border-0 focus:outline-none" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} placeholder="输入商品" />
-                        </td>
-                        <td className="p-2 border-r">
-                          <input type="text" className="w-full border-0 focus:outline-none text-slate-500" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} />
-                        </td>
-                        <td className="p-2 border-r text-center">
-                          <input type="number" className="w-12 border-0 text-center focus:outline-none" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} />
-                        </td>
-                        <td className="p-2 border-r text-right">
-                          <input type="number" className="w-16 border-0 text-right focus:outline-none font-semibold" value={item.unitPrice} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} />
-                        </td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none text-slate-500" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-center"><input type="number" className="w-12 border-0 text-center focus:outline-none" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-right"><input type="number" className="w-16 border-0 text-right focus:outline-none" value={item.unitPrice} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
                         <td className="p-2 text-right font-bold">¥{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                <div className="text-right text-sm font-black text-red-600">
-                  最终报价总额: ¥{docMeta.items.reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}
-                </div>
-                <div className="bg-slate-50 p-3 rounded text-[10px] text-slate-500 space-y-1">
-                  <p>1. 报价有效期为：30天（由于消防原材料价格浮动较快，请尽早确认）。</p>
-                  <p>2. 以上价格已包含常规调试，不包含现场复杂布线及管路改造施工。</p>
-                </div>
+                <div className="text-right text-sm font-black text-red-600">最终总额: ¥{docMeta.items.reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
               </div>
             )}
 
-            {/* 采购合同展示 */}
             {(currentModal === 'contract-general' || currentModal === 'contract-special') && (
               <div className="space-y-6 text-xs text-slate-800 leading-relaxed">
                 <div className="text-center">
-                  <h1 className="text-xl font-bold">
-                    物资采购合同（{currentModal === 'contract-special' ? '增值税专票13%' : '普通发票'}）
-                  </h1>
-                  <p className="text-[10px] text-slate-400 mt-1">合同编号：HT-{Date.now().toString().slice(-6)}</p>
+                  <h1 className="text-xl font-bold">物资采购合同（{currentModal === 'contract-special' ? '增值税专票13%' : '普通发票'}）</h1>
                 </div>
-
-                <div className="space-y-1">
-                  <div><strong>买方 (甲方)：</strong>{customers.find(c => c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</div>
-                  <div><strong>卖方 (乙方)：</strong>{docMeta.ourCompany}</div>
+                <div>
+                  <p><strong>买方 (甲方)：</strong>{customers.find(c => c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</p>
+                  <p><strong>卖方 (乙方)：</strong>{docMeta.ourCompany}</p>
                 </div>
-
-                <p className="text-[10px] text-slate-600">
-                  依据《中华人民共和国民法典》及相关消防工程材料技术规范，甲乙双方本着互惠、自愿、诚信原则，就消防安全器材物资采购事宜，达成如下契约共同遵守：
-                </p>
-
                 <table className="w-full text-[10px] text-left border border-slate-300">
                   <thead className="bg-slate-100 border-b border-slate-300">
                     <tr>
@@ -970,77 +1101,35 @@ export default function App() {
                       <th className="p-2 border-r">单位</th>
                       <th className="p-2 border-r text-center">数量</th>
                       <th className="p-2 border-r text-right">单价</th>
-                      <th className="p-2 text-right">总金额</th>
+                      <th className="p-2 text-right">金额</th>
                     </tr>
                   </thead>
                   <tbody>
                     {docMeta.items.map((item, idx) => (
                       <tr key={idx} className="border-b">
-                        <td className="p-2 border-r">
-                          <input type="text" className="w-full border-0 focus:outline-none" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} placeholder="物料名称" />
-                        </td>
-                        <td className="p-2 border-r">
-                          <input type="text" className="w-full border-0 focus:outline-none" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} />
-                        </td>
-                        <td className="p-2 border-r">
-                          <input type="text" className="w-full border-0 focus:outline-none" value={item.unit} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} />
-                        </td>
-                        <td className="p-2 border-r text-center">
-                          <input type="number" className="w-10 border-0 text-center focus:outline-none" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} />
-                        </td>
-                        <td className="p-2 border-r text-right">
-                          <input type="number" className="w-14 border-0 text-right focus:outline-none" value={item.unitPrice} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} />
-                        </td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.unit} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-center"><input type="number" className="w-10 border-0 text-center" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-right"><input type="number" className="w-14 border-0 text-right" value={item.unitPrice} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
                         <td className="p-2 text-right font-semibold">¥{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-
-                <div className="space-y-1 text-right font-medium">
-                  <div>合同总额 (含税价)：¥{docMeta.items.reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
-                  {currentModal === 'contract-special' && (
-                    <div className="text-[10px] text-slate-500">
-                      其中 13% 增值税销项税额：¥{(docMeta.items.reduce((sum, item) => sum + (item.amount || 0), 0) * 0.13 / 1.13).toFixed(2)}
-                    </div>
-                  )}
+                <div className="text-right font-medium">
+                  <div>合同总额：¥{docMeta.items.reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
+                  {currentModal === 'contract-special' && <div className="text-[10px] text-slate-500">含 13% 专票税额</div>}
                 </div>
-
-                <div className="space-y-2 border-t pt-3">
-                  <h4 className="font-bold">第一条 交付期限及方式</h4>
-                  <p className="text-[10px] text-slate-600">
-                    乙方应于本合同生效之日起 7 个工作日内，将上述消防器材运送至买方指定地点。
-                  </p>
-
-                  <h4 className="font-bold">第二条 质量保证与验收标准</h4>
-                  <p className="text-[10px] text-slate-600">
-                    乙方所提供消防设备，其技术指标必须完全符合国家消防安全监督标准。入场验收前，乙方需随货交付国家强制性消防认证证书及出厂合格证。
-                  </p>
-
-                  <h4 className="font-bold">第三条 发票与税务条款</h4>
-                  <p className="text-[10px] text-slate-600">
-                    {currentModal === 'contract-special' 
-                      ? "本采购合同采用 13% 增值税专用发票。买方有权在卖方开具足额、合格的增值税专用发票前，拒绝支付后续款项。双方发票与付款账户信息见下方签名区域。"
-                      : "本采购合同采用增值税普通发票。卖方收款后应于3个工作日内向买方开具足额的发票。"}
-                  </p>
-                </div>
-
                 <div className="grid grid-cols-2 gap-4 border-t pt-4 text-[10px] leading-relaxed">
                   <div className="space-y-1 border-r pr-2">
-                    <p className="font-bold">甲方 (买方/盖章)：</p>
+                    <p className="font-bold">甲方 (买方)：</p>
                     <p>税号：{customers.find(c => c.id === docMeta.selectedCustomerId)?.taxId || '-'}</p>
-                    <p>开户行：{customers.find(c => c.id === docMeta.selectedCustomerId)?.bank || '-'}</p>
                     <p>账号：{customers.find(c => c.id === docMeta.selectedCustomerId)?.account || '-'}</p>
-                    <p>代表签名：</p>
-                    <p>签署时间：       年    月    日</p>
                   </div>
                   <div className="space-y-1 pl-2">
-                    <p className="font-bold">乙方 (卖方/盖章)：</p>
+                    <p className="font-bold">乙方 (卖方)：</p>
                     <p>公司：{docMeta.ourCompany}</p>
-                    <p>开户行：工商银行消防支行</p>
-                    <p>账号：6222 0210 2000 8921 110</p>
-                    <p>代表签名：</p>
-                    <p>签署时间：       年    月    日</p>
                   </div>
                 </div>
               </div>
@@ -1049,35 +1138,21 @@ export default function App() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* 底部功能导航区 */}
-      {/* ======================================================== */}
+      {/* 底部导航 */}
       <footer className="no-print fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 z-40 flex h-16">
-        <button
-          onClick={() => setActiveTab('home')}
-          className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'home' ? 'text-red-600' : 'text-slate-400'}`}
-        >
+        <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'home' ? 'text-red-600' : 'text-slate-400'}`}>
           <span className="text-xl">🏠</span>
           <span className="text-[10px] mt-0.5">首页</span>
         </button>
-        <button
-          onClick={() => setActiveTab('products')}
-          className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'products' ? 'text-red-600' : 'text-slate-400'}`}
-        >
+        <button onClick={() => setActiveTab('products')} className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'products' ? 'text-red-600' : 'text-slate-400'}`}>
           <span className="text-xl">📦</span>
           <span className="text-[10px] mt-0.5">商品</span>
         </button>
-        <button
-          onClick={() => setActiveTab('customers')}
-          className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'customers' ? 'text-red-600' : 'text-slate-400'}`}
-        >
+        <button onClick={() => setActiveTab('customers')} className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'customers' ? 'text-red-600' : 'text-slate-400'}`}>
           <span className="text-xl">👥</span>
           <span className="text-[10px] mt-0.5">客户</span>
         </button>
-        <button
-          onClick={() => setActiveTab('profile')}
-          className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'profile' ? 'text-red-600' : 'text-slate-400'}`}
-        >
+        <button onClick={() => setActiveTab('profile')} className={`flex-1 flex flex-col items-center justify-center ${activeTab === 'profile' ? 'text-red-600' : 'text-slate-400'}`}>
           <span className="text-xl">⚙️</span>
           <span className="text-[10px] mt-0.5">我的</span>
         </button>
