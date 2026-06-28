@@ -4,17 +4,28 @@ import React, { useState, useEffect, useMemo } from 'react';
 // 默认日志数据与版本历史 (不写死，方便后续维护追溯)
 // ==========================================
 const SYSTEM_LOGS = [
-  { version: "v1.2.2", date: "2026-06-28", desc: "极致稳定性重构。将所有 React Hook 规范置于顶部，规避组件热重载硬伤；全面加固本地缓存防御，防止任何空引用引发白屏。" },
-  { version: "v1.2.1", date: "2026-06-28", desc: "加固白屏防御机制。对本地存储解析、状态变更、输入框值绑定及过滤器进行全流程空值保护与 try-catch 拦截。" },
-  { version: "v1.2.0", date: "2026-06-28", desc: "新增无服务器本地多账户登录系统。支持新设备首登凭 URL 快捷绑定，引入新设备首登强制下载机制（安全锁防空白覆盖）。" }
+  { 
+    version: "v1.2.3", 
+    date: "2026-06-28", 
+    desc: "极致折行重构。将所有超长 JSX 标签及内联函数重组为多行垂直排列，防止粘贴截断。" 
+  },
+  { 
+    version: "v1.2.2", 
+    date: "2026-06-28", 
+    desc: "稳定性重构。将所有 React Hook 规范置于顶部，全面加固本地缓存防御。" 
+  },
+  { 
+    version: "v1.2.1", 
+    date: "2026-06-28", 
+    desc: "加固白屏防御机制。对本地存储解析、状态变更等进行全流程空值保护。" 
+  }
 ];
 
 export default function App() {
   // ==========================================
-  // 1. 全局状态声明 (统一归置于顶部，规避 React Hook 规范警告)
+  // 1. 全局状态声明 (统一归置于顶部)
   // ==========================================
   
-  // 账户库防崩解析机制
   const [accounts, setAccounts] = useState(() => {
     try {
       const data = localStorage.getItem('crm_accounts');
@@ -38,7 +49,13 @@ export default function App() {
     }
   });
 
-  const [authForm, setAuthForm] = useState({ username: '', password: '', sheetUrl: '', isNewDevice: false });
+  const [authForm, setAuthForm] = useState({ 
+    username: '', 
+    password: '', 
+    sheetUrl: '', 
+    isNewDevice: false 
+  });
+  
   const [skus, setSkus] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [activeTab, setActiveTab] = useState('home');
@@ -49,13 +66,30 @@ export default function App() {
 
   const [editingSku, setEditingSku] = useState(null);
   const [isAddingSku, setIsAddingSku] = useState(false);
-  const [skuForm, setSkuForm] = useState({ name: '', purchasePrice: '', brand: '', unit: '', remarks: '' });
+  const [skuForm, setSkuForm] = useState({ 
+    name: '', 
+    purchasePrice: '', 
+    brand: '', 
+    unit: '', 
+    remarks: '' 
+  });
+  
   const [bulkInputType, setBulkInputType] = useState(null);
   const [bulkText, setBulkText] = useState('');
 
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
-  const [customerForm, setCustomerForm] = useState({ name: '', company: '', taxId: '', address: '', contact: '', account: '', bank: '', phone: '' });
+  const [customerForm, setCustomerForm] = useState({ 
+    name: '', 
+    company: '', 
+    taxId: '', 
+    address: '', 
+    contact: '', 
+    account: '', 
+    bank: '', 
+    phone: '' 
+  });
+  
   const [viewingExclusivePrice, setViewingExclusivePrice] = useState(null);
 
   const [docMeta, setDocMeta] = useState({
@@ -66,11 +100,19 @@ export default function App() {
     taxRate: 13,
     deliveryTerms: '卖方负责运送至买方指定地点，买方卸货。',
     paymentTerms: '合同签订之日起 3 个工作日内，买方付清全部款项。',
-    items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]
+    items: [{ 
+      skuName: '', 
+      brand: '通用', 
+      unit: '个', 
+      qty: 1, 
+      unitPrice: 0, 
+      amount: 0, 
+      remarks: '' 
+    }]
   });
 
   // ==========================================
-  // 2. 派生状态计算 (useMemo 统一归置，强化对空值、非对象元素的防护)
+  // 2. 派生状态计算 (useMemo 统一归置)
   // ==========================================
   const filteredSkus = useMemo(() => {
     return (skus || []).filter(s => {
@@ -147,7 +189,6 @@ export default function App() {
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
   };
 
-  // 通过对象展开运算符，绝对保障 currentAccount 包含必要默认属性
   const currentAccount = {
     sheetUrl: '',
     hasSynced: false,
@@ -240,10 +281,10 @@ export default function App() {
   };
 
   const exportDataToCSV = (filename, headers, rows) => {
-    const csvContent = "\ufeff" + [
+    const csvContent = "\\ufeff" + [
       headers.join(","),
       ...rows.map(row => row.map(val => `"${(val || '').toString().replace(/"/g, '""')}"`).join(","))
-    ].join("\n");
+    ].join("\\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -255,19 +296,19 @@ export default function App() {
   };
 
   const handleCSVImport = (text, type) => {
-    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    const lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length === 0) {
       triggerToast('未检测到有效数据', 'error');
       return;
     }
 
-    const separators = [',', '\\t', ';', '|'];
+    const separators = [',', '\\\\t', ';', '|'];
     let bestSep = ',';
     let maxCount = -1;
     const testLines = lines.slice(0, 3);
     separators.forEach(sep => {
       let count = 0;
-      const regexSep = sep === '\\t' ? '\t' : sep;
+      const regexSep = sep === '\\\\t' ? '\\t' : sep;
       testLines.forEach(l => {
         count += (l.split(regexSep).length - 1);
       });
@@ -623,9 +664,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // 6. 主业务区渲染布局 (含各 Tab 及 Modal)
-  // ==========================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col shadow-xl relative pb-20 font-sans">
       <header className="bg-red-600 text-white p-4 sticky top-0 z-40 flex justify-between items-center shadow-md">
@@ -666,22 +704,60 @@ export default function App() {
           <div className="space-y-4">
             <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider pl-1">单据与合同生成</h3>
             <div className="grid grid-cols-2 gap-4">
-              <button onClick={() => { setCurrentModal('sales'); setDocMeta({...docMeta, items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]}); }} className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all">
+              <button 
+                onClick={() => { 
+                  setCurrentModal('sales'); 
+                  setDocMeta({
+                    ...docMeta, 
+                    items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]
+                  }); 
+                }} 
+                className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all"
+              >
                 <span className="text-3xl mb-2">📋</span>
                 <span className="font-semibold text-slate-800 text-sm">销售单</span>
               </button>
               
-              <button onClick={() => { setCurrentModal('quote'); setDocMeta({...docMeta, items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]}); }} className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all">
+              <button 
+                onClick={() => { 
+                  setCurrentModal('quote'); 
+                  setDocMeta({
+                    ...docMeta, 
+                    items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]
+                  }); 
+                }} 
+                className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all"
+              >
                 <span className="text-3xl mb-2">🏷️</span>
                 <span className="font-semibold text-slate-800 text-sm">报价单</span>
               </button>
 
-              <button onClick={() => { setCurrentModal('contract-general'); setDocMeta({...docMeta, taxRate: 1, items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]}); }} className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all">
+              <button 
+                onClick={() => { 
+                  setCurrentModal('contract-general'); 
+                  setDocMeta({
+                    ...docMeta, 
+                    taxRate: 1, 
+                    items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]
+                  }); 
+                }} 
+                className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all"
+              >
                 <span className="text-3xl mb-2">📄</span>
                 <span className="font-semibold text-slate-800 text-sm">采购合同 (普票)</span>
               </button>
 
-              <button onClick={() => { setCurrentModal('contract-special'); setDocMeta({...docMeta, taxRate: 13, items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]}); }} className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all">
+              <button 
+                onClick={() => { 
+                  setCurrentModal('contract-special'); 
+                  setDocMeta({
+                    ...docMeta, 
+                    taxRate: 13, 
+                    items: [{ skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }]
+                  }); 
+                }} 
+                className="flex flex-col items-center justify-center p-5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-red-400 active:scale-95 transition-all"
+              >
                 <span className="text-3xl mb-2">🎖️</span>
                 <span className="font-semibold text-slate-800 text-sm">采购合同 (专票)</span>
               </button>
@@ -701,13 +777,29 @@ export default function App() {
           />
 
           <div className="grid grid-cols-3 gap-2">
-            <button onClick={() => { setSkuForm({ name: '', purchasePrice: '', brand: '通用', unit: '个', remarks: '' }); setIsAddingSku(true); }} className="bg-red-600 text-white py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-red-700">
+            <button 
+              onClick={() => { 
+                setSkuForm({ name: '', purchasePrice: '', brand: '通用', unit: '个', remarks: '' }); 
+                setIsAddingSku(true); 
+              }} 
+              className="bg-red-600 text-white py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-red-700"
+            >
               添加 SKU
             </button>
-            <button onClick={() => setBulkInputType('sku')} className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300">
+            <button 
+              onClick={() => setBulkInputType('sku')} 
+              className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300"
+            >
               批量导入
             </button>
-            <button onClick={() => exportDataToCSV('商品库存导出.csv', ['商品名称', '进货价格', '品牌', '单位', '备注'], skus.map(s => [s.name, s.purchasePrice, s.brand, s.unit, s.remarks]))} className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300">
+            <button 
+              onClick={() => exportDataToCSV(
+                '商品库存导出.csv', 
+                ['商品名称', '进货价格', '品牌', '单位', '备注'], 
+                skus.map(s => [s.name, s.purchasePrice, s.brand, s.unit, s.remarks])
+              )} 
+              className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300"
+            >
               导出表格
             </button>
           </div>
@@ -726,7 +818,10 @@ export default function App() {
                 </div>
                 <div className="text-right">
                   <div className="text-red-600 font-bold text-sm">¥{item.purchasePrice || 0}</div>
-                  <button onClick={() => { setEditingSku(item); setSkuForm({ ...item }); }} className="text-xs text-blue-500 underline mt-1.5 inline-block">
+                  <button 
+                    onClick={() => { setEditingSku(item); setSkuForm({ ...item }); }} 
+                    className="text-xs text-blue-500 underline mt-1.5 inline-block"
+                  >
                     编辑
                   </button>
                 </div>
@@ -747,13 +842,29 @@ export default function App() {
           />
 
           <div className="grid grid-cols-3 gap-2">
-            <button onClick={() => { setCustomerForm({ name: '', company: '', taxId: '', address: '', contact: '', account: '', bank: '', phone: '' }); setIsAddingCustomer(true); }} className="bg-red-600 text-white py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-red-700">
+            <button 
+              onClick={() => { 
+                setCustomerForm({ name: '', company: '', taxId: '', address: '', contact: '', account: '', bank: '', phone: '' }); 
+                setIsAddingCustomer(true); 
+              }} 
+              className="bg-red-600 text-white py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-red-700"
+            >
               添加客户
             </button>
-            <button onClick={() => setBulkInputType('customer')} className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300">
+            <button 
+              onClick={() => setBulkInputType('customer')} 
+              className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300"
+            >
               批量导入
             </button>
-            <button onClick={() => exportDataToCSV('客户名单导出.csv', ['客户名称', '税号', '地址', '联系人', '账户', '开户行', '电话'], customers.map(c => [c.name, c.taxId, c.address, c.contact, c.account, c.bank, c.phone]))} className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300">
+            <button 
+              onClick={() => exportDataToCSV(
+                '客户名单导出.csv', 
+                ['客户名称', '税号', '地址', '联系人', '账户', '开户行', '电话'], 
+                customers.map(c => [c.name, c.taxId, c.address, c.contact, c.account, c.bank, c.phone])
+              )} 
+              className="bg-slate-200 text-slate-800 py-2 rounded-lg text-xs font-semibold shadow-sm active:bg-slate-300"
+            >
               导出表格
             </button>
           </div>
@@ -769,10 +880,16 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5 text-right">
-                  <button onClick={() => { setEditingCustomer(c); setCustomerForm({ ...c }); }} className="text-xs text-slate-600 bg-slate-100 py-1 px-2.5 rounded-md hover:bg-slate-200">
+                  <button 
+                    onClick={() => { setEditingCustomer(c); setCustomerForm({ ...c }); }} 
+                    className="text-xs text-slate-600 bg-slate-100 py-1 px-2.5 rounded-md hover:bg-slate-200"
+                  >
                     档案编辑
                   </button>
-                  <button onClick={() => setViewingExclusivePrice(c)} className="text-xs text-white bg-red-500 py-1 px-2.5 rounded-md hover:bg-red-600">
+                  <button 
+                    onClick={() => setViewingExclusivePrice(c)} 
+                    className="text-xs text-white bg-red-500 py-1 px-2.5 rounded-md hover:bg-red-600"
+                  >
                     专属价格
                   </button>
                 </div>
@@ -785,7 +902,10 @@ export default function App() {
       {activeTab === 'profile' && (
         <div className="p-4 flex-1 space-y-6">
           <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm text-center relative">
-            <button onClick={handleLogout} className="absolute top-4 right-4 text-xs text-red-600 bg-red-50 hover:bg-red-100 py-1 px-2.5 rounded-lg font-medium">
+            <button 
+              onClick={handleLogout} 
+              className="absolute top-4 right-4 text-xs text-red-600 bg-red-50 hover:bg-red-100 py-1 px-2.5 rounded-lg font-medium"
+            >
               退出登录
             </button>
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -827,7 +947,7 @@ export default function App() {
               <button
                 disabled={currentAccount.sheetUrl !== "" && !currentAccount.hasSynced}
                 onClick={() => handleCloudBackup('upload')}
-                className={`py-2 px-3 rounded-lg text-xs font-semibold shadow-sm text-white ${
+                className={`py-2 px-3 rounded-lg text-xs font-semibold shadow-sm text-white \${
                   (currentAccount.sheetUrl !== "" && !currentAccount.hasSynced)
                     ? 'bg-slate-300 cursor-not-allowed'
                     : 'bg-emerald-600 hover:bg-emerald-700'
@@ -869,15 +989,25 @@ export default function App() {
             <textarea
               rows="6"
               className="w-full border border-slate-200 rounded-xl p-3 text-xs focus:ring-1 focus:ring-red-500"
-              placeholder={bulkInputType === 'sku' ? "示例 1 (仅商品和进价):\n消防栓箱 420\n烟感探头 45\n\n示例 2 (完整格式):\n品名,价格,品牌,单位\n干粉灭火器,65,XX牌,个" : "客户公司名称,税号,地址,联系人,电话\nXX消防工程公司,91320...,XX路,王经理,138..."}
+              placeholder={bulkInputType === 'sku' ? "示例 1 (仅商品和进价):\\n消防栓箱 420\\n烟感探头 45" : "客户公司名称,税号,地址,联系人,电话\\nXX消防工程公司,91320...,XX路"}
               value={bulkText || ''}
               onChange={(e) => setBulkText(e.target.value)}
             />
             <div className="flex gap-3">
-              <button onClick={() => setBulkInputType(null)} className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600">
+              <button 
+                onClick={() => setBulkInputType(null)} 
+                className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600"
+              >
                 取消
               </button>
-              <button onClick={() => { handleCSVImport(bulkText, bulkInputType); setBulkText(''); setBulkInputType(null); }} className="flex-1 bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold">
+              <button 
+                onClick={() => { 
+                  handleCSVImport(bulkText, bulkInputType); 
+                  setBulkText(''); 
+                  setBulkInputType(null); 
+                }} 
+                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold"
+              >
                 开始导入
               </button>
             </div>
@@ -890,24 +1020,64 @@ export default function App() {
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4">
             <h3 className="font-bold text-slate-800 text-base">{isAddingSku ? '新增消防物资' : '编辑消防物资'}</h3>
             <div className="space-y-3">
-              <input type="text" placeholder="商品名称" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.name || ''} onChange={(e) => setSkuForm({ ...skuForm, name: e.target.value })} />
-              <input type="number" placeholder="进货价格 (元)" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.purchasePrice || ''} onChange={(e) => setSkuForm({ ...skuForm, purchasePrice: parseFloat(e.target.value) || 0 })} />
-              <input type="text" placeholder="生产品牌" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.brand || ''} onChange={(e) => setSkuForm({ ...skuForm, brand: e.target.value })} />
-              <input type="text" placeholder="计量单位" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.unit || ''} onChange={(e) => setSkuForm({ ...skuForm, unit: e.target.value })} />
-              <input type="text" placeholder="备注信息" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.remarks || ''} onChange={(e) => setSkuForm({ ...skuForm, remarks: e.target.value })} />
+              <input 
+                type="text" 
+                placeholder="商品名称" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={skuForm.name || ''} 
+                onChange={(e) => setSkuForm({ ...skuForm, name: e.target.value })} 
+              />
+              <input 
+                type="number" 
+                placeholder="进货价格 (元)" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={skuForm.purchasePrice || ''} 
+                onChange={(e) => setSkuForm({ ...skuForm, purchasePrice: parseFloat(e.target.value) || 0 })} 
+              />
+              <input 
+                type="text" 
+                placeholder="生产品牌" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={skuForm.brand || ''} 
+                onChange={(e) => setSkuForm({ ...skuForm, brand: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="计量单位" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={skuForm.unit || ''} 
+                onChange={(e) => setSkuForm({ ...skuForm, unit: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="备注信息" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={skuForm.remarks || ''} 
+                onChange={(e) => setSkuForm({ ...skuForm, remarks: e.target.value })} 
+              />
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { setIsAddingSku(false); setEditingSku(null); }} className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600">取消</button>
-              <button onClick={() => {
-                if (isAddingSku) {
-                  setSkus([...skus, { ...skuForm, id: 'sku_' + Date.now() }]);
-                  setIsAddingSku(false);
-                } else {
-                  setSkus(skus.map(s => s.id === editingSku.id ? { ...skuForm, id: editingSku.id } : s));
-                  setEditingSku(null);
-                }
-                triggerToast('物资配置更新成功！');
-              }} className="flex-1 bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold">保存</button>
+              <button 
+                onClick={() => { setIsAddingSku(false); setEditingSku(null); }} 
+                className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600"
+              >
+                取消
+              </button>
+              <button 
+                onClick={() => {
+                  if (isAddingSku) {
+                    setSkus([...skus, { ...skuForm, id: 'sku_' + Date.now() }]);
+                    setIsAddingSku(false);
+                  } else {
+                    setSkus(skus.map(s => s.id === editingSku.id ? { ...skuForm, id: editingSku.id } : s));
+                    setEditingSku(null);
+                  }
+                  triggerToast('物资配置更新成功！');
+                }} 
+                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold"
+              >
+                保存
+              </button>
             </div>
           </div>
         </div>
@@ -918,26 +1088,78 @@ export default function App() {
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-3 overflow-y-auto max-h-[90vh]">
             <h3 className="font-bold text-slate-800 text-base">{isAddingCustomer ? '登记新客户' : '修改客户档案'}</h3>
             <div className="space-y-3">
-              <input type="text" placeholder="客户名称/单位" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.name || ''} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value, company: e.target.value })} />
-              <input type="text" placeholder="纳税人识别号/税号" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.taxId || ''} onChange={(e) => setCustomerForm({ ...customerForm, taxId: e.target.value })} />
-              <input type="text" placeholder="注册/通信地址" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.address || ''} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} />
-              <input type="text" placeholder="联系人" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.contact || ''} onChange={(e) => setCustomerForm({ ...customerForm, contact: e.target.value })} />
-              <input type="text" placeholder="开户银行" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.bank || ''} onChange={(e) => setCustomerForm({ ...customerForm, bank: e.target.value })} />
-              <input type="text" placeholder="银行账号" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.account || ''} onChange={(e) => setCustomerForm({ ...customerForm, account: e.target.value })} />
-              <input type="text" placeholder="联系电话" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.phone || ''} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} />
+              <input 
+                type="text" 
+                placeholder="客户名称/单位" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={customerForm.name || ''} 
+                onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value, company: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="纳税人识别号/税号" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={customerForm.taxId || ''} 
+                onChange={(e) => setCustomerForm({ ...customerForm, taxId: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="注册/通信地址" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={customerForm.address || ''} 
+                onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="联系人" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={customerForm.contact || ''} 
+                onChange={(e) => setCustomerForm({ ...customerForm, contact: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="开户银行" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={customerForm.bank || ''} 
+                onChange={(e) => setCustomerForm({ ...customerForm, bank: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="银行账号" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={customerForm.account || ''} 
+                onChange={(e) => setCustomerForm({ ...customerForm, account: e.target.value })} 
+              />
+              <input 
+                type="text" 
+                placeholder="联系电话" 
+                className="w-full px-3 py-2 border rounded-lg text-xs" 
+                value={customerForm.phone || ''} 
+                onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} 
+              />
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { setIsAddingCustomer(false); setEditingCustomer(null); }} className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600">取消</button>
-              <button onClick={() => {
-                if (isAddingCustomer) {
-                  setCustomers([...customers, { ...customerForm, id: 'cust_' + Date.now(), exclusivePrices: {} }]);
-                  setIsAddingCustomer(false);
-                } else {
-                  setCustomers(customers.map(c => c.id === editingCustomer.id ? { ...customerForm, id: editingCustomer.id, exclusivePrices: c.exclusivePrices } : c));
-                  setEditingCustomer(null);
-                }
-                triggerToast('客户档案同步成功！');
-              }} className="flex-1 bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold">保存</button>
+              <button 
+                onClick={() => { setIsAddingCustomer(false); setEditingCustomer(null); }} 
+                className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600"
+              >
+                取消
+              </button>
+              <button 
+                onClick={() => {
+                  if (isAddingCustomer) {
+                    setCustomers([...customers, { ...customerForm, id: 'cust_' + Date.now(), exclusivePrices: {} }]);
+                    setIsAddingCustomer(false);
+                  } else {
+                    setCustomers(customers.map(c => c.id === editingCustomer.id ? { ...customerForm, id: editingCustomer.id, exclusivePrices: c.exclusivePrices } : c));
+                    setEditingCustomer(null);
+                  }
+                  triggerToast('客户档案同步成功！');
+                }} 
+                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold"
+              >
+                保存
+              </button>
             </div>
           </div>
         </div>
@@ -958,7 +1180,7 @@ export default function App() {
                       <span className="text-slate-400">进价: ¥{s.purchasePrice || 0}</span>
                       <input
                         type="number"
-                        className={`w-20 px-2 py-1 rounded text-right border ${isCustom ? 'border-red-400 bg-red-50 text-red-600 font-bold' : 'border-slate-200'}`}
+                        className={`w-20 px-2 py-1 rounded text-right border \${isCustom ? 'border-red-400 bg-red-50 text-red-600 font-bold' : 'border-slate-200'}`}
                         value={value || 0}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value) || 0;
@@ -977,7 +1199,12 @@ export default function App() {
                 );
               })}
             </div>
-            <button onClick={() => setViewingExclusivePrice(null)} className="w-full bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold">确认关闭</button>
+            <button 
+              onClick={() => setViewingExclusivePrice(null)} 
+              className="w-full bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold"
+            >
+              确认关闭
+            </button>
           </div>
         </div>
       )}
@@ -989,11 +1216,20 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div>
                 <label className="block text-[10px] text-slate-500">本方开单公司</label>
-                <input type="text" className="w-full p-2 border rounded" value={docMeta.ourCompany || ''} onChange={(e) => setDocMeta({...docMeta, ourCompany: e.target.value})} />
+                <input 
+                  type="text" 
+                  className="w-full p-2 border rounded" 
+                  value={docMeta.ourCompany || ''} 
+                  onChange={(e) => setDocMeta({...docMeta, ourCompany: e.target.value})} 
+                />
               </div>
               <div>
                 <label className="block text-[10px] text-slate-500">目标合作客商</label>
-                <select className="w-full p-2 border rounded" value={docMeta.selectedCustomerId || ''} onChange={(e) => setDocMeta({...docMeta, selectedCustomerId: e.target.value})}>
+                <select 
+                  className="w-full p-2 border rounded" 
+                  value={docMeta.selectedCustomerId || ''} 
+                  onChange={(e) => setDocMeta({...docMeta, selectedCustomerId: e.target.value})}
+                >
                   <option value="">-- 请选择关联客户 --</option>
                   {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name || ''}</option>)}
                 </select>
@@ -1037,17 +1273,72 @@ export default function App() {
                   <tbody>
                     {(docMeta.items || []).map((item, idx) => (
                       <tr key={idx} className="border-b">
-                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 focus:bg-white" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
-                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 w-10" value={item.unit || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-1"><input type="number" className="w-full bg-slate-50 border-0 text-center w-12" value={item.qty || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-1"><input type="number" className="w-full bg-slate-50 border-0 text-right w-16" value={item.unitPrice || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-1">
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-50 border-0 focus:bg-white" 
+                            value={item.skuName || ''} 
+                            onChange={(e) => updateDocItemSku(idx, e.target.value)} 
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-50 border-0" 
+                            value={item.brand || ''} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].brand = e.target.value; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-50 border-0 w-10" 
+                            value={item.unit || ''} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].unit = e.target.value; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input 
+                            type="number" 
+                            className="w-full bg-slate-50 border-0 text-center w-12" 
+                            value={item.qty || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].qty = parseInt(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input 
+                            type="number" 
+                            className="w-full bg-slate-50 border-0 text-right w-16" 
+                            value={item.unitPrice || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
                         <td className="p-2 text-right font-bold text-slate-800">¥{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                <div className="text-right font-bold text-sm">合计总额: ¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
+                <div className="text-right font-bold text-sm">
+                  合计总额: ¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}
+                </div>
               </div>
             )}
 
@@ -1076,6 +1367,199 @@ export default function App() {
                   <tbody>
                     {(docMeta.items || []).map((item, idx) => (
                       <tr key={idx} className="border-b">
+                        <td className="p-2 border-r">
+                          <input 
+                            type="text" 
+                            className="w-full border-0 focus:outline-none" 
+                            value={item.skuName || ''} 
+                            onChange={(e) => updateDocItemSku(idx, e.target.value)} 
+                          />
+                        </td>
+                        <td className="p-2 border-r">
+                          <input 
+                            type="text" 
+                            className="w-full border-0 focus:outline-none text-slate-500" 
+                            value={item.brand || ''} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].brand = e.target.value; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-2 border-r text-center">
+                          <input 
+                            type="number" 
+                            className="w-12 border-0 text-center focus:outline-none" 
+                            value={item.qty || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].qty = parseInt(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-2 border-r text-right">
+                          <input 
+                            type="number" 
+                            className="w-16 border-0 text-right focus:outline-none" 
+                            value={item.unitPrice || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-2 text-right font-bold">¥{(item.amount || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="text-right text-sm font-black text-red-600">
+                  最终总额: ¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}
+                </div>
+              </div>
+            )}
+
+            {(currentModal === 'contract-general' || currentModal === 'contract-special') && (
+              <div className="space-y-6 text-xs text-slate-800 leading-relaxed">
+                <div className="text-center">
+                  <h1 className="text-xl font-bold">物资采购合同（{currentModal === 'contract-special' ? '增值税专票13%' : '普通发票'}）</h1>
+                </div>
+                <div>
+                  <p><strong>买方 (甲方)：</strong>{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</p>
+                  <p><strong>卖方 (乙方)：</strong>{docMeta.ourCompany || ''}</p>
+                </div>
+                <table className="w-full text-[10px] text-left border border-slate-300">
+                  <thead className="bg-slate-100 border-b border-slate-300">
+                    <tr>
+                      <th className="p-2 border-r">货物名称</th>
+                      <th className="p-2 border-r">品牌</th>
+                      <th className="p-2 border-r">单位</th>
+                      <th className="p-2 border-r text-center">数量</th>
+                      <th className="p-2 border-r text-right">单价</th>
+                      <th className="p-2 text-right">金额</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(docMeta.items || []).map((item, idx) => (
+                      <tr key={idx} className="border-b">
                         <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none text-slate-500" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r text-center"><input type="number" className="w-12 border-0 text-center focus:outline-none" value={item.qty || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty 
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.unit || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-center">
+                          <input 
+                            type="number" 
+                            className="w-10 border-0 text-center" 
+                            value={item.qty || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].qty = parseInt(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-2 border-r text-right">
+                          <input 
+                            type="number" 
+                            className="w-14 border-0 text-right" 
+                            value={item.unitPrice || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-2 text-right font-semibold">¥{(item.amount || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="text-right font-medium">
+                  <div>合同总额：¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
+                  {currentModal === 'contract-special' && <div className="text-[10px] text-slate-500">含 13% 专票税额</div>}
+                </div>
+                <div className="grid grid-cols-2 gap-4 border-t pt-4 text-[10px] leading-relaxed">
+                  <div className="space-y-1 border-r pr-2">
+                    <p className="font-bold">甲方 (买方)：</p>
+                    <p>税号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.taxId || '-'}</p>
+                    <p>账号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.account || '-'}</p>
+                  </div>
+                  <div className="space-y-1 pl-2">
+                    <p className="font-bold">乙方 (卖方)：</p>
+                    <p>公司：{docMeta.ourCompany || ''}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!!toast.show && (
+        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm text-white font-medium animate-bounce \${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
+          {toast.message}
+        </div>
+      )}
+
+      <footer className="no-print fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 z-40 flex h-16">
+        <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'home' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">🏠</span>
+          <span className="text-[10px] mt-0.5">首页</span>
+        </button>
+        <button onClick={() => setActiveTab('products')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'products' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">📦</span>
+          <span className="text-[10px] mt-0.5">商品</span>
+        </button>
+        <button onClick={() => setActiveTab('customers')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'customers' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">👥</span>
+          <span className="text-[10px] mt-0.5">客户</span>
+        </button>
+        <button onClick={() => setActiveTab('profile')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'profile' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">⚙️</span>
+          <span className="text-[10px] mt-0.5">我的</span>
+        </button>
+      </footer>
+    </div>
+  );
+}
+"""
+
+# Now write a python script to break down *every* line to be safe.
+lines = code_body.split('\n')
+formatted_lines = []
+for line in lines:
+    if len(line) <= 110:
+        formatted_lines.append(line)
+    else:
+        # We need to manually split line based on attributes
+        # Let's check if the line contains a long JSX tag or statement
+        if 'onClick=' in line or 'onChange=' in line or 'className=' in line or 'value=' in line:
+            # Simple attribute spacer splitting
+            indent = re.match(r'^\s*', line).group(0)
+            parts = re.split(r'\s+(?=\w+=|\/?>)', line.strip())
+            # Join beautifully
+            new_line = indent + parts[0]
+            for p in parts[1:]:
+                new_line += "\n" + indent + "  " + p
+            formatted_lines.append(new_line)
+        else:
+            formatted_lines.append(line)
+
+final_js = "\n".join(formatted_lines)
+print("Formatting Completed!")
+
+# Audit long lines in final_js
+long_rem = 0
+for idx, line in enumerate(final_js.splitlines()):
+    if len(line) > 110:
+        long_rem += 1
+
+print("Remaining lines exceeding 110 chars:", long_rem)
+}}
