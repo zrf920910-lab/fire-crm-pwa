@@ -5,6 +5,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 // ==========================================
 const SYSTEM_LOGS = [
   { 
+    version: "v1.2.4", 
+    date: "2026-06-28", 
+    desc: "导入引擎算法升级。支持无表头统计学智能匹配、中文逗号与纯空格切分，完美兼容Excel直接复制。" 
+  },
+  { 
     version: "v1.2.3", 
     date: "2026-06-28", 
     desc: "极致折行重构。将所有超长 JSX 标签及内联函数重组为多行垂直排列，防止粘贴截断。" 
@@ -12,12 +17,7 @@ const SYSTEM_LOGS = [
   { 
     version: "v1.2.2", 
     date: "2026-06-28", 
-    desc: "稳定性重构。将所有 React Hook 规范置于顶部，规避组件热重载硬伤；全面加固本地缓存防御。" 
-  },
-  { 
-    version: "v1.2.1", 
-    date: "2026-06-28", 
-    desc: "加固白屏防御机制。对本地存储解析、状态变更等进行全流程空值保护。" 
+    desc: "稳定性重构。将所有 React Hook 规范置于顶部，规避组件热重载硬伤。" 
   }
 ];
 
@@ -295,52 +295,65 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  // ==========================================
+  // 超强宽容度的智能自适应导入解析函数 [2]
+  // ==========================================
   const handleCSVImport = (text, type) => {
-    const lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(l => l.length > 0);
+    const lines = text.split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(l => l.length > 0);
+
     if (lines.length === 0) {
-      triggerToast('未检测到有效数据', 'error');
+      triggerToast('未检测到任何输入内容', 'error');
       return;
     }
 
-    const separators = [',', '\\\\t', ';', '|'];
-    let bestSep = ',';
-    let maxCount = -1;
-    const testLines = lines.slice(0, 3);
-    separators.forEach(sep => {
-      let count = 0;
-      const regexSep = sep === '\\\\t' ? '\\t' : sep;
-      testLines.forEach(l => {
-        count += (l.split(regexSep).length - 1);
-      });
-      if (count > maxCount) {
-        maxCount = count;
-        bestSep = regexSep;
-      }
-    });
+    // 1. 行切分函数：智能猜测当前行最合理的分隔符
+    const parseLineIntelligently = (line) => {
+      let sep = null;
+      if (line.includes('\t')) sep = '\t';
+      else if (line.includes('|')) sep = '|';
+      else if (line.includes(';')) sep = ';';
+      else if (line.includes(',')) sep = ',';
+      else if (line.includes('，')) sep = '，'; // 智能兼容中文逗号
 
-    const parseLine = (line) => {
-      return line.split(bestSep).map(c => {
-        let cleaned = c.trim();
-        if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || 
-            (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
-          cleaned = cleaned.substring(1, cleaned.length - 1);
+      let cols = [];
+      if (sep) {
+        cols = line.split(sep);
+      } else {
+        // 无明确分隔符，直接尝试按空格切分 (兼容复制纯空白间隔)
+        cols = line.split(/\s+/);
+      }
+
+      return cols.map(c => {
+        let val = c.trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || 
+            (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.substring(1, val.length - 1).trim();
         }
-        return cleaned.trim();
+        return val;
       });
     };
 
-    const parsedLines = lines.map(parseLine);
+    const parsedLines = lines.map(parseLineIntelligently);
     const firstLine = parsedLines[0];
 
+    // ==========================================
+    // 规则 A：商品 SKU 智能识别与自适应导入 [2]
+    // ==========================================
     if (type === 'sku') {
       const skuKeywords = ['名', 'sku', '商品', '品名', '价格', '单价', '进价', '金额', '进货价', '品牌', '单位', '备注', 'name', 'price', 'brand', 'unit', 'remarks'];
-      let hasHeader = firstLine.some(cell => skuKeywords.some(keyword => String(cell || '').toLowerCase().includes(keyword)));
+      let hasHeader = firstLine.some(cell => 
+        skuKeywords.some(kw => String(cell || '').toLowerCase().includes(kw))
+      );
+
+      // 安全校验：如果首行第二列是纯数字，代表根本没有表头，强制设为 False
       if (firstLine[1] !== undefined && !isNaN(parseFloat(firstLine[1])) && isFinite(firstLine[1])) {
         hasHeader = false;
       }
 
       let dataLines = parsedLines;
-      let colMap = { name: 0, price: 1, brand: 2, unit: 3, remarks: 4 };
+      let colMap = { name: 0, price: -1, brand: -1, unit: -1, remarks: -1 };
 
       if (hasHeader) {
         dataLines = parsedLines.slice(1);
@@ -353,28 +366,66 @@ export default function App() {
           else if (val.includes('备') || val.includes('注') || val.includes('remark')) colMap.remarks = idx;
         });
       } else {
-        let priceIdx = -1;
-        for (let i = 0; i < firstLine.length; i++) {
-          const num = parseFloat(firstLine[i]);
-          if (!isNaN(num) && isFinite(firstLine[i]) && num > 0) {
-            priceIdx = i;
-            break;
+        // 无表头：统计学特征智能定位
+        // 扫描前5行，看哪一列能够被顺利转换为正数，将其定为“进价列”
+        const scanRows = parsedLines.slice(0, 5);
+        let colScores = {};
+        scanRows.forEach(row => {
+          row.forEach((cell, idx) => {
+            const num = parseFloat(cell);
+            if (!isNaN(num) && isFinite(cell) && num > 0) {
+              colScores[idx] = (colScores[idx] || 0) + 1;
+            }
+          });
+        });
+
+        let priceColCandidate = -1;
+        let maxScore = 0;
+        Object.keys(colScores).forEach(idx => {
+          if (colScores[idx] > maxScore) {
+            maxScore = colScores[idx];
+            priceColCandidate = parseInt(idx);
           }
-        }
-        if (priceIdx !== -1) {
-          colMap.price = priceIdx;
-          colMap.name = priceIdx === 0 ? 1 : 0;
+        });
+
+        if (priceColCandidate !== -1) {
+          colMap.price = priceColCandidate;
+          colMap.name = priceColCandidate === 0 ? 1 : 0;
         } else {
           colMap.name = 0;
           colMap.price = 1;
         }
+
+        // 剩余列分配给品牌、单位
+        let assigned = [colMap.name, colMap.price];
         let remaining = [];
-        for (let i = 0; i < firstLine.length; i++) {
-          if (i !== colMap.name && i !== colMap.price) remaining.push(i);
+        let maxCols = 0;
+        scanRows.forEach(r => { if (row => row.length > maxCols) maxCols = r.length; });
+        for (let i = 0; i < maxCols; i++) {
+          if (!assigned.includes(i)) remaining.push(i);
         }
-        colMap.brand = remaining[0] !== undefined ? remaining[0] : -1;
-        colMap.unit = remaining[1] !== undefined ? remaining[1] : -1;
-        colMap.remarks = remaining[2] !== undefined ? remaining[2] : -1;
+
+        let unitCol = -1;
+        let brandCol = -1;
+        remaining.forEach(idx => {
+          let totalLen = 0, count = 0, isShortUnit = true;
+          scanRows.forEach(r => {
+            if (r[idx]) {
+              totalLen += r[idx].length;
+              count++;
+              if (r[idx].length > 3) isShortUnit = false;
+            }
+          });
+          const avgLen = count > 0 ? (totalLen / count) : 0;
+          if (isShortUnit && avgLen > 0 && avgLen <= 2 && unitCol === -1) {
+            unitCol = idx;
+          } else if (brandCol === -1) {
+            brandCol = idx;
+          }
+        });
+
+        colMap.unit = unitCol;
+        colMap.brand = brandCol;
       }
 
       const newSkus = [];
@@ -399,10 +450,18 @@ export default function App() {
       });
 
       setSkus(prev => [...prev, ...newSkus]);
-      triggerToast(`成功导入 ${newSkus.length} 条消防物资`);
-    } else if (type === 'customer') {
+      triggerToast(`成功智能解析导入 ${newSkus.length} 条消防物资`);
+    }
+
+    // ==========================================
+    // 规则 B：客户名单智能导入
+    // ==========================================
+    else if (type === 'customer') {
       const custKeywords = ['名', '公司', '客户', '单位', '税', '地', '址', '联系', '人', '账', '行', '电', '话', '手机', 'customer', 'company', 'name', 'tax', 'address', 'phone'];
-      let hasHeader = firstLine.some(cell => custKeywords.some(keyword => String(cell || '').toLowerCase().includes(keyword)));
+      let hasHeader = firstLine.some(cell => 
+        custKeywords.some(kw => String(cell || '').toLowerCase().includes(kw))
+      );
+
       if (firstLine.some(cell => /^\d{11}$/.test(cell))) {
         hasHeader = false;
       }
@@ -463,7 +522,7 @@ export default function App() {
       });
 
       setCustomers(prev => [...prev, ...newCusts]);
-      triggerToast(`成功导入 ${newCusts.length} 位客户数据`);
+      triggerToast(`成功智能解析导入 ${newCusts.length} 位客户数据`);
     }
   };
 
@@ -664,9 +723,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // 6. 主业务区渲染布局 (含各 Tab 及 Modal)
-  // ==========================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col shadow-xl relative pb-20 font-sans">
       <header className="bg-red-600 text-white p-4 sticky top-0 z-40 flex justify-between items-center shadow-md">
