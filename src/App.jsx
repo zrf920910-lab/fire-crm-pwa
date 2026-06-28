@@ -12,7 +12,7 @@ const SYSTEM_LOGS = [
   { 
     version: "v1.2.2", 
     date: "2026-06-28", 
-    desc: "稳定性重构。将所有 React Hook 规范置于顶部，全面加固本地缓存防御。" 
+    desc: "稳定性重构。将所有 React Hook 规范置于顶部，规避组件热重载硬伤；全面加固本地缓存防御。" 
   },
   { 
     version: "v1.2.1", 
@@ -664,6 +664,9 @@ export default function App() {
     );
   }
 
+  // ==========================================
+  // 6. 主业务区渲染布局 (含各 Tab 及 Modal)
+  // ==========================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col shadow-xl relative pb-20 font-sans">
       <header className="bg-red-600 text-white p-4 sticky top-0 z-40 flex justify-between items-center shadow-md">
@@ -1418,9 +1421,7 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
-                <div className="text-right text-sm font-black text-red-600">
-                  最终总额: ¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}
-                </div>
+                <div className="text-right text-sm font-black text-red-600">最终总额: ¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
               </div>
             )}
 
@@ -1529,37 +1530,3 @@ export default function App() {
     </div>
   );
 }
-"""
-
-# Now write a python script to break down *every* line to be safe.
-lines = code_body.split('\n')
-formatted_lines = []
-for line in lines:
-    if len(line) <= 110:
-        formatted_lines.append(line)
-    else:
-        # We need to manually split line based on attributes
-        # Let's check if the line contains a long JSX tag or statement
-        if 'onClick=' in line or 'onChange=' in line or 'className=' in line or 'value=' in line:
-            # Simple attribute spacer splitting
-            indent = re.match(r'^\s*', line).group(0)
-            parts = re.split(r'\s+(?=\w+=|\/?>)', line.strip())
-            # Join beautifully
-            new_line = indent + parts[0]
-            for p in parts[1:]:
-                new_line += "\n" + indent + "  " + p
-            formatted_lines.append(new_line)
-        else:
-            formatted_lines.append(line)
-
-final_js = "\n".join(formatted_lines)
-print("Formatting Completed!")
-
-# Audit long lines in final_js
-long_rem = 0
-for idx, line in enumerate(final_js.splitlines()):
-    if len(line) > 110:
-        long_rem += 1
-
-print("Remaining lines exceeding 110 chars:", long_rem)
-}}
