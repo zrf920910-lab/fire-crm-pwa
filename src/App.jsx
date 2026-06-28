@@ -523,7 +523,6 @@ export default function App() {
     try {
       if (action === 'upload') {
         const payload = { skus, customers };
-        // 修改1: 为绕过谷歌无预检选项，Content-Type调整为 text/plain 规避 preflight [2]
         await fetch(sheetUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -691,7 +690,9 @@ export default function App() {
                   onChange={(e) => setAuthForm({ ...authForm, sheetUrl: e.target.value })}
                 />
                 <p className="text-[10px] text-slate-400 leading-normal pt-1 pl-1">
-                  💡 输入后，系统会自动在新设备上建立此账户索引。为了保障云端安全，<strong>登录后必须在“我的”页面先点击一次【下载并恢复云端】才能解锁上传</strong>，防范空白数据覆盖！
+                  💡 输入后，系统会自动在新设备上建立此账户索引。为了保障云端安全，
+                  <strong>登录后必须在“我的”页面先点击一次【下载并恢复云端】才能解锁上传</strong>
+                  ，防范空白数据覆盖！
                 </p>
               </div>
             )}
@@ -705,9 +706,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // 6. 主业务区渲染布局 (含各 Tab 及 Modal)
-  // ==========================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col shadow-xl relative pb-20 font-sans">
       <header className="bg-red-600 text-white p-4 sticky top-0 z-40 flex justify-between items-center shadow-md">
@@ -725,7 +723,9 @@ export default function App() {
             <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl text-xs text-amber-800 space-y-1.5 shadow-sm">
               <div className="font-bold flex items-center gap-1">⚠️ 新设备数据安全锁已启用</div>
               <p className="text-[10px] opacity-90 leading-relaxed">
-                当前检测到您在新设备登录。为防止本地空沙盒意外覆盖谷歌云端历史备份，<strong>【备份到云端】功能已被临时安全锁闭</strong>。请立即前往“我的”页面点击<strong>【下载并恢复云端】</strong>完成同步初始化！
+                当前检测到您在新设备登录。为防止本地空沙盒意外覆盖谷歌云端历史备份，
+                <strong>【备份到云端】功能已被临时安全锁闭</strong>。
+                请立即前往“我的”页面点击<strong>【下载并恢复云端】</strong>完成同步初始化！
               </p>
             </div>
           )}
@@ -1466,11 +1466,118 @@ export default function App() {
               </div>
             )}
 
-            {(currentModal === 'contract-general' || currentModal === 'contract-special') && (
+            {(currentModal === 'contract-general' || currentModal === 'contract-special' || currentModal === 'contract') && (
               <div className="space-y-6 text-xs text-slate-800 leading-relaxed">
                 <div className="text-center">
                   <h1 className="text-xl font-bold">物资采购合同（{currentModal === 'contract-special' ? '增值税专票13%' : '普通发票'}）</h1>
                 </div>
                 <div>
                   <p><strong>买方 (甲方)：</strong>{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</p>
-                  <p><strong>卖方
+                  <p><strong>卖方 (乙方)：</strong>{docMeta.ourCompany || ''}</p>
+                </div>
+                <table className="w-full text-[10px] text-left border border-slate-300">
+                  <thead className="bg-slate-100 border-b border-slate-300">
+                    <tr>
+                      <th className="p-2 border-r">货物名称</th>
+                      <th className="p-2 border-r">品牌</th>
+                      <th className="p-2 border-r">单位</th>
+                      <th className="p-2 border-r text-center">数量</th>
+                      <th className="p-2 border-r text-right">单价</th>
+                      <th className="p-2 text-right">金额</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(docMeta.items || []).map((item, idx) => (
+                      <tr key={idx} className="border-b">
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.unit || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-center">
+                          <input 
+                            type="number" 
+                            className="w-10 border-0 text-center" 
+                            value={item.qty || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].qty = parseInt(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-2 border-r text-right">
+                          <input 
+                            type="number" 
+                            className="w-14 border-0 text-right" 
+                            value={item.unitPrice || 0} 
+                            onChange={(e) => { 
+                              const its = [...docMeta.items]; 
+                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
+                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
+                              setDocMeta({...docMeta, items: its}); 
+                            }} 
+                          />
+                        </td>
+                        <td className="p-2 text-right font-semibold">¥{(item.amount || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="text-right font-medium">
+                  <div>合同总额：¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
+                  {currentModal === 'contract-special' && <div className="text-[10px] text-slate-500">含 13% 专票税额</div>}
+                </div>
+                <div className="grid grid-cols-2 gap-4 border-t pt-4 text-[10px] leading-relaxed">
+                  <div className="space-y-1 border-r pr-2">
+                    <p className="font-bold">甲方 (买方)：</p>
+                    <p>税号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.taxId || '-'}</p>
+                    <p>账号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.account || '-'}</p>
+                  </div>
+                  <div className="space-y-1 pl-2">
+                    <p className="font-bold">乙方 (卖方)：</p>
+                    <p>公司：{docMeta.ourCompany || ''}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 优化: 引入高对比度背景 Toast, 独立样式，提升可读性 */}
+      {!!toast.show && (
+        <div 
+          className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-2xl text-sm font-semibold flex items-center gap-2.5 animate-bounce"
+          style={{ 
+            backgroundColor: '#1e293b', 
+            color: '#ffffff', 
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.35), 0 10px 10px -5px rgba(0, 0, 0, 0.35)',
+            borderLeft: toast.type === 'error' ? '4px solid #ef4444' : '4px solid #10b981'
+          }}
+        >
+          <span>{toast.type === 'error' ? '❌' : '✨'}</span>
+          <span>{toast.message || ''}</span>
+        </div>
+      )}
+
+      <footer className="no-print fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 z-40 flex h-16">
+        <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'home' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">🏠</span>
+          <span className="text-[10px] mt-0.5">首页</span>
+        </button>
+        <button onClick={() => setActiveTab('products')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'products' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">📦</span>
+          <span className="text-[10px] mt-0.5">商品</span>
+        </button>
+        <button onClick={() => setActiveTab('customers')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'customers' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">👥</span>
+          <span className="text-[10px] mt-0.5">客户</span>
+        </button>
+        <button onClick={() => setActiveTab('profile')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'profile' ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className="text-xl">⚙️</span>
+          <span className="text-[10px] mt-0.5">我的</span>
+        </button>
+      </footer>
+    </div>
+  );
+}
