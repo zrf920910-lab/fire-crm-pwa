@@ -4,17 +4,32 @@ import React, { useState, useEffect, useMemo } from 'react';
 // 默认日志数据与版本历史 (不写死，方便后续维护追溯)
 // ==========================================
 const SYSTEM_LOGS = [
+  { version: "v1.2.1", date: "2026-06-28", desc: "加固白屏防御机制。对本地存储解析、状态变更、输入框值绑定及过滤器进行全流程空值保护与 try-catch 拦截。" },
   { version: "v1.2.0", date: "2026-06-28", desc: "新增无服务器本地多账户登录系统。支持新设备首登凭 URL 快捷绑定，引入新设备首登强制下载机制（安全锁防空白覆盖）。" },
-  { version: "v1.1.0", date: "2026-06-28", desc: "导入机制升级。新增 CSV/TSV 智能分隔符识别，支持 Excel 复制内容一键直接粘帖，强化无表头及缺省字段自适应填充。" },
-  { version: "v1.0.0", date: "2026-06-28", desc: "消防CRM基础版本上线。支持首页四大开单工具、SKU管理、客户管理、全模块原生数据导入导出以及带安全锁的Google Sheet云备份系统。" }
+  { version: "v1.1.0", date: "2026-06-28", desc: "导入机制升级。新增 CSV/TSV 智能分隔符识别，支持 Excel 复制内容一键直接粘帖，强化无表头及缺省字段自适应填充。" }
 ];
 
 export default function App() {
   // ==========================================
-  // 1. 本地账户库与当前登录用户状态
+  // 1. 本地账户库与当前登录用户状态 (增加安全防崩溃解析)
   // ==========================================
-  const [accounts, setAccounts] = useState(() => JSON.parse(localStorage.getItem('crm_accounts') || '{}'));
-  const [currentUsername, setCurrentUsername] = useState(() => localStorage.getItem('crm_current_user') || '');
+  const [accounts, setAccounts] = useState(() => {
+    try {
+      const data = localStorage.getItem('crm_accounts');
+      return data ? JSON.parse(data) : {};
+    } catch (e) {
+      console.error("解析本地账户库失败，已自动重置:", e);
+      return {};
+    }
+  });
+
+  const [currentUsername, setCurrentUsername] = useState(() => {
+    try {
+      return localStorage.getItem('crm_current_user') || '';
+    } catch (e) {
+      return '';
+    }
+  });
 
   // 登录/注册表单临时状态
   const [authForm, setAuthForm] = useState({ username: '', password: '', sheetUrl: '', isNewDevice: false });
@@ -34,13 +49,24 @@ export default function App() {
   // 提示信息通知
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
-  // 3. 当登录用户切换时，重新从 localStorage 加载其对应的数据
+  // 3. 当登录用户切换时，重新从 localStorage 加载其对应的数据 (增加安全异常拦截)
   useEffect(() => {
     if (currentUsername) {
-      const savedSkus = localStorage.getItem(`crm_skus_${currentUsername}`) || '[]';
-      const savedCustomers = localStorage.getItem(`crm_customers_${currentUsername}`) || '[]';
-      setSkus(JSON.parse(savedSkus));
-      setCustomers(JSON.parse(savedCustomers));
+      try {
+        const savedSkus = localStorage.getItem(`crm_skus_${currentUsername}`) || '[]';
+        setSkus(JSON.parse(savedSkus));
+      } catch (e) {
+        console.error("解析该账户的SKU库失败，已置空:", e);
+        setSkus([]);
+      }
+      
+      try {
+        const savedCustomers = localStorage.getItem(`crm_customers_${currentUsername}`) || '[]';
+        setCustomers(JSON.parse(savedCustomers));
+      } catch (e) {
+        console.error("解析该账户的客户库失败，已置空:", e);
+        setCustomers([]);
+      }
     } else {
       setSkus([]);
       setCustomers([]);
@@ -50,13 +76,21 @@ export default function App() {
   // 4. 数据变动时自动持久化至对应账户的独立沙盒中
   useEffect(() => {
     if (currentUsername) {
-      localStorage.setItem(`crm_skus_${currentUsername}`, JSON.stringify(skus));
+      try {
+        localStorage.setItem(`crm_skus_${currentUsername}`, JSON.stringify(skus));
+      } catch (e) {
+        console.error("本地SKU库写入缓存失败:", e);
+      }
     }
   }, [skus, currentUsername]);
 
   useEffect(() => {
     if (currentUsername) {
-      localStorage.setItem(`crm_customers_${currentUsername}`, JSON.stringify(customers));
+      try {
+        localStorage.setItem(`crm_customers_${currentUsername}`, JSON.stringify(customers));
+      } catch (e) {
+        console.error("本地客户库写入缓存失败:", e);
+      }
     }
   }, [customers, currentUsername]);
 
@@ -65,41 +99,54 @@ export default function App() {
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
   };
 
-  // 当前激活的账户配置信息 (若无，提供空安全垫)
-  const currentAccount = accounts[currentUsername] || { sheetUrl: '', hasSynced: false };
+  // 当前激活的账户配置信息 (通过多层对象安全展开，确保 accounts[currentUsername] 缺失时绝不崩溃)
+  const currentAccount = {
+    sheetUrl: '',
+    hasSynced: false,
+    ...((accounts && accounts[currentUsername]) ? accounts[currentUsername] : {})
+  };
 
   // ==========================================
   // 5. 本地登录与注册逻辑
   // ==========================================
   const handleAuthSubmit = (e) => {
     e.preventDefault();
-    const u = authForm.username.trim();
-    const p = authForm.password.trim();
-    const url = authForm.sheetUrl.trim();
+    const u = (authForm.username || '').trim();
+    const p = (authForm.password || '').trim();
+    const url = (authForm.sheetUrl || '').trim();
 
     if (!u || !p) {
       triggerToast('请输入用户名和密码', 'error');
       return;
     }
 
-    const existingAcc = accounts[u];
+    const existingAcc = accounts && accounts[u];
 
     if (authForm.isNewDevice) {
-      // 首次登录新设备 或 注册新本地账户
+      // 首次登录新设备 或 注册新本地账户 (增加安全预防 prev 未定义结构)
       setAccounts(prev => {
+        const safePrev = (prev && typeof prev === 'object') ? prev : {};
         const updated = {
-          ...prev,
+          ...safePrev,
           [u]: {
             password: p,       // 本地验证密码
             sheetUrl: url,     // 记住绑定的云备份URL
             hasSynced: false   // 强制开启新设备同步安全锁 [1]
           }
         };
-        localStorage.setItem('crm_accounts', JSON.stringify(updated));
+        try {
+          localStorage.setItem('crm_accounts', JSON.stringify(updated));
+        } catch (err) {
+          console.error("缓存账户列表出错:", err);
+        }
         return updated;
       });
       setCurrentUsername(u);
-      localStorage.setItem('crm_current_user', u);
+      try {
+        localStorage.setItem('crm_current_user', u);
+      } catch (err) {
+        console.error("缓存当前登录态出错:", err);
+      }
       setAuthForm({ username: '', password: '', sheetUrl: '', isNewDevice: false });
       triggerToast(`本地账户 ${u} 激活成功。安全锁已启用，请先下载云端备份！`);
     } else {
@@ -113,28 +160,37 @@ export default function App() {
         return;
       }
       setCurrentUsername(u);
-      localStorage.setItem('crm_current_user', u);
+      try {
+        localStorage.setItem('crm_current_user', u);
+      } catch (err) {
+        console.error("缓存当前登录态出错:", err);
+      }
       triggerToast(`欢迎回来，${u}！`);
     }
   };
 
   const handleLogout = () => {
     setCurrentUsername('');
-    localStorage.removeItem('crm_current_user');
+    try {
+      localStorage.removeItem('crm_current_user');
+    } catch(e) {}
     triggerToast('已安全退出登录');
   };
 
   const handleUpdateSheetUrl = (newUrl) => {
     setAccounts(prev => {
+      const safePrev = (prev && typeof prev === 'object') ? prev : {};
       const updated = {
-        ...prev,
+        ...safePrev,
         [currentUsername]: {
-          ...prev[currentUsername],
+          ...safePrev[currentUsername],
           sheetUrl: newUrl,
           hasSynced: false // 更改 URL 时重置同步锁，安全起见需重新下拉一次
         }
       };
-      localStorage.setItem('crm_accounts', JSON.stringify(updated));
+      try {
+        localStorage.setItem('crm_accounts', JSON.stringify(updated));
+      } catch(e) {}
       return updated;
     });
     triggerToast('云备份 URL 配置已更新，安全锁已重置。');
@@ -200,7 +256,7 @@ export default function App() {
 
     if (type === 'sku') {
       const skuKeywords = ['名', 'sku', '商品', '品名', '价格', '单价', '进价', '金额', '进货价', '品牌', '单位', '备注', 'name', 'price', 'brand', 'unit', 'remarks'];
-      let hasHeader = firstLine.some(cell => skuKeywords.some(keyword => cell.toLowerCase().includes(keyword)));
+      let hasHeader = firstLine.some(cell => skuKeywords.some(keyword => String(cell || '').toLowerCase().includes(keyword)));
       if (firstLine[1] !== undefined && !isNaN(parseFloat(firstLine[1])) && isFinite(firstLine[1])) {
         hasHeader = false;
       }
@@ -211,7 +267,7 @@ export default function App() {
       if (hasHeader) {
         dataLines = parsedLines.slice(1);
         firstLine.forEach((cell, idx) => {
-          const val = cell.toLowerCase();
+          const val = String(cell || '').toLowerCase();
           if (val.includes('名') || val.includes('sku') || val.includes('name')) colMap.name = idx;
           else if (val.includes('价') || val.includes('额') || val.includes('price')) colMap.price = idx;
           else if (val.includes('牌') || val.includes('brand')) colMap.brand = idx;
@@ -268,7 +324,7 @@ export default function App() {
       triggerToast(`成功导入 ${newSkus.length} 条消防物资`);
     } else if (type === 'customer') {
       const custKeywords = ['名', '公司', '客户', '单位', '税', '地', '址', '联系', '人', '账', '行', '电', '话', '手机', 'customer', 'company', 'name', 'tax', 'address', 'phone'];
-      let hasHeader = firstLine.some(cell => custKeywords.some(keyword => cell.toLowerCase().includes(keyword)));
+      let hasHeader = firstLine.some(cell => custKeywords.some(keyword => String(cell || '').toLowerCase().includes(keyword)));
       if (firstLine.some(cell => /^\d{11}$/.test(cell))) {
         hasHeader = false;
       }
@@ -279,7 +335,7 @@ export default function App() {
       if (hasHeader) {
         dataLines = parsedLines.slice(1);
         firstLine.forEach((cell, idx) => {
-          const val = cell.toLowerCase();
+          const val = String(cell || '').toLowerCase();
           if (val.includes('名') || val.includes('公司') || val.includes('客户') || val.includes('单位') || val.includes('name') || val.includes('company')) {
             colMap.name = idx;
             colMap.company = idx;
@@ -375,10 +431,11 @@ export default function App() {
           
           // 标志置为 true，解除本地上传的锁
           setAccounts(prev => {
+            const safePrev = (prev && typeof prev === 'object') ? prev : {};
             const updated = {
-              ...prev,
+              ...safePrev,
               [currentUsername]: {
-                ...prev[currentUsername],
+                ...safePrev[currentUsername],
                 hasSynced: true
               }
             };
@@ -389,10 +446,11 @@ export default function App() {
         } else {
           // 云端无数据，说明是完全干净的云表格，允许解锁首次写入
           setAccounts(prev => {
+            const safePrev = (prev && typeof prev === 'object') ? prev : {};
             const updated = {
-              ...prev,
+              ...safePrev,
               [currentUsername]: {
-                ...prev[currentUsername],
+                ...safePrev[currentUsername],
                 hasSynced: true
               }
             };
@@ -497,13 +555,23 @@ export default function App() {
     triggerToast('销售单保存成功，缺失的商品及客商专属价格已反向同步更新！');
   };
 
-  // 模糊检索筛选器
+  // 模糊检索筛选器 (加强空指针防御，规避 data-crash) [2]
   const filteredSkus = useMemo(() => {
-    return skus.filter(s => s.name.toLowerCase().includes(productSearch.toLowerCase()) || (s.brand && s.brand.toLowerCase().includes(productSearch.toLowerCase())));
+    return (skus || []).filter(s => {
+      const name = s && s.name ? String(s.name).toLowerCase() : '';
+      const brand = s && s.brand ? String(s.brand).toLowerCase() : '';
+      const search = String(productSearch || '').toLowerCase();
+      return name.includes(search) || brand.includes(search);
+    });
   }, [skus, productSearch]);
 
   const filteredCustomers = useMemo(() => {
-    return customers.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.contact && c.contact.toLowerCase().includes(customerSearch.toLowerCase())));
+    return (customers || []).filter(c => {
+      const name = c && c.name ? String(c.name).toLowerCase() : '';
+      const contact = c && c.contact ? String(c.contact).toLowerCase() : '';
+      const search = String(customerSearch || '').toLowerCase();
+      return name.includes(search) || contact.includes(search);
+    });
   }, [customers, customerSearch]);
 
   // ==========================================
@@ -527,7 +595,7 @@ export default function App() {
                 required
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                 placeholder="例如: admin"
-                value={authForm.username}
+                value={authForm.username || ''}
                 onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
               />
             </div>
@@ -539,7 +607,7 @@ export default function App() {
                 required
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                 placeholder="输入设备校验密码"
-                value={authForm.password}
+                value={authForm.password || ''}
                 onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
               />
             </div>
@@ -553,19 +621,19 @@ export default function App() {
               <input
                 type="checkbox"
                 className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500"
-                checked={authForm.isNewDevice}
+                checked={!!authForm.isNewDevice}
                 onChange={(e) => setAuthForm({ ...authForm, isNewDevice: e.target.checked })}
               />
             </div>
 
-            {authForm.isNewDevice && (
+            {!!authForm.isNewDevice && (
               <div className="space-y-1 animate-fade-in">
                 <label className="text-xs font-bold text-red-600">关联 Google Sheet Web App URL (选填)</label>
                 <input
                   type="password"
                   className="w-full px-4 py-2.5 rounded-xl border border-red-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-red-50/30"
                   placeholder="https://script.google.com/macros/s/.../exec"
-                  value={authForm.sheetUrl}
+                  value={authForm.sheetUrl || ''}
                   onChange={(e) => setAuthForm({ ...authForm, sheetUrl: e.target.value })}
                 />
                 <p className="text-[10px] text-slate-400 leading-normal pt-1 pl-1">
@@ -599,20 +667,13 @@ export default function App() {
         </div>
       </header>
 
-      {/* 核心Toast通知 */}
-      {toast.show && (
-        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm text-white font-medium animate-bounce ${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
-          {toast.message}
-        </div>
-      )}
-
       {/* ==========================================
           TAB 1: 首页 (包含快捷表单、合同)
           ========================================== */}
       {activeTab === 'home' && (
         <div className="p-4 space-y-6 flex-1">
-          {/* 新设备安全警告条 (如果未做首次下载备份) [1] */}
-          {currentAccount.sheetUrl && !currentAccount.hasSynced && (
+          {/* 新设备安全警告条 (强转 Boolean 防 JSX 渲染硬伤) [1] */}
+          {!!currentAccount.sheetUrl && !currentAccount.hasSynced && (
             <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl text-xs text-amber-800 space-y-1.5 shadow-sm">
               <div className="font-bold flex items-center gap-1">⚠️ 新设备数据安全锁已启用</div>
               <p className="text-[10px] opacity-90 leading-relaxed">
@@ -672,7 +733,7 @@ export default function App() {
             type="text"
             placeholder="🔍 输入商品名称 / 品牌进行搜索..."
             className="w-full px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
-            value={productSearch}
+            value={productSearch || ''}
             onChange={(e) => setProductSearch(e.target.value)}
           />
 
@@ -692,7 +753,7 @@ export default function App() {
             {filteredSkus.map(item => (
               <div key={item.id} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex justify-between items-center">
                 <div>
-                  <h4 className="font-semibold text-slate-800 text-sm">{item.name}</h4>
+                  <h4 className="font-semibold text-slate-800 text-sm">{item.name || ''}</h4>
                   <div className="flex gap-2 text-xs text-slate-400 mt-1">
                     <span>品牌: {item.brand || '未设定'}</span>
                     <span>|</span>
@@ -701,7 +762,7 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-0.5">备注: {item.remarks || '-'}</p>
                 </div>
                 <div className="text-right">
-                  <div className="text-red-600 font-bold text-sm">¥{item.purchasePrice}</div>
+                  <div className="text-red-600 font-bold text-sm">¥{item.purchasePrice || 0}</div>
                   <button onClick={() => { setEditingSku(item); setSkuForm({ ...item }); }} className="text-xs text-blue-500 underline mt-1.5 inline-block">
                     编辑
                   </button>
@@ -721,7 +782,7 @@ export default function App() {
             type="text"
             placeholder="🔍 输入客户公司 / 姓名 / 电话搜索..."
             className="w-full px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
-            value={customerSearch}
+            value={customerSearch || ''}
             onChange={(e) => setCustomerSearch(e.target.value)}
           />
 
@@ -741,7 +802,7 @@ export default function App() {
             {filteredCustomers.map(c => (
               <div key={c.id} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex justify-between items-center">
                 <div>
-                  <h4 className="font-semibold text-slate-800 text-sm">{c.name}</h4>
+                  <h4 className="font-semibold text-slate-800 text-sm">{c.name || ''}</h4>
                   <div className="text-xs text-slate-400 mt-1 space-y-0.5">
                     <p>联系人: {c.contact || '-'} | {c.phone || '-'}</p>
                     <p className="text-[10px] truncate max-w-[220px]">单位: {c.company || '-'}</p>
@@ -773,7 +834,7 @@ export default function App() {
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <span className="text-3xl">⚙️</span>
             </div>
-            <h3 className="font-bold text-slate-800 text-base">{currentUsername}</h3>
+            <h3 className="font-bold text-slate-800 text-base">{currentUsername || ''}</h3>
             <p className="text-xs text-slate-400 mt-1">本地沙箱运行 · 账号专属库</p>
           </div>
 
@@ -794,7 +855,7 @@ export default function App() {
               />
             </div>
 
-            {currentAccount.sheetUrl && !currentAccount.hasSynced && (
+            {!!currentAccount.sheetUrl && !currentAccount.hasSynced && (
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 leading-relaxed">
                 ⚠️ <strong>新设备安全警告：</strong> 当前账号尚未执行数据初始化拉取。为保护您云端可能存在的历史数据不被本地空数据清空，<strong>【备份到云端】已被禁用。请立即先点击【下载并恢复云端】 [1]！</strong>
               </div>
@@ -833,7 +894,7 @@ export default function App() {
                     <span>{log.version}</span>
                     <span className="text-slate-400">{log.date}</span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">{log.desc}</p>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">{log.desc || ''}</p>
                 </div>
               ))}
             </div>
@@ -845,7 +906,7 @@ export default function App() {
       {/* 全局业务弹窗：CSV批量解析 & 单体 SKU 与客户增改 */}
       {/* ======================================================== */}
 
-      {bulkInputType && (
+      {!!bulkInputType && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4">
             <h3 className="font-bold text-slate-800 text-base">
@@ -858,7 +919,7 @@ export default function App() {
               rows="6"
               className="w-full border border-slate-200 rounded-xl p-3 text-xs focus:ring-1 focus:ring-red-500"
               placeholder={bulkInputType === 'sku' ? "示例 1 (仅商品和进价):\n消防栓箱 420\n烟感探头 45\n\n示例 2 (完整格式):\n品名,价格,品牌,单位\n干粉灭火器,65,XX牌,个" : "客户公司名称,税号,地址,联系人,电话\nXX消防工程公司,91320...,XX路,王经理,138..."}
-              value={bulkText}
+              value={bulkText || ''}
               onChange={(e) => setBulkText(e.target.value)}
             />
             <div className="flex gap-3">
@@ -874,16 +935,16 @@ export default function App() {
       )}
 
       {/* SKU 增加与编辑 */}
-      {(isAddingSku || editingSku) && (
+      {!!(isAddingSku || editingSku) && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4">
             <h3 className="font-bold text-slate-800 text-base">{isAddingSku ? '新增消防物资' : '编辑消防物资'}</h3>
             <div className="space-y-3">
-              <input type="text" placeholder="商品名称" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.name} onChange={(e) => setSkuForm({ ...skuForm, name: e.target.value })} />
-              <input type="number" placeholder="进货价格 (元)" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.purchasePrice} onChange={(e) => setSkuForm({ ...skuForm, purchasePrice: parseFloat(e.target.value) || 0 })} />
-              <input type="text" placeholder="生产品牌" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.brand} onChange={(e) => setSkuForm({ ...skuForm, brand: e.target.value })} />
-              <input type="text" placeholder="计量单位" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.unit} onChange={(e) => setSkuForm({ ...skuForm, unit: e.target.value })} />
-              <input type="text" placeholder="备注信息" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.remarks} onChange={(e) => setSkuForm({ ...skuForm, remarks: e.target.value })} />
+              <input type="text" placeholder="商品名称" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.name || ''} onChange={(e) => setSkuForm({ ...skuForm, name: e.target.value })} />
+              <input type="number" placeholder="进货价格 (元)" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.purchasePrice || ''} onChange={(e) => setSkuForm({ ...skuForm, purchasePrice: parseFloat(e.target.value) || 0 })} />
+              <input type="text" placeholder="生产品牌" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.brand || ''} onChange={(e) => setSkuForm({ ...skuForm, brand: e.target.value })} />
+              <input type="text" placeholder="计量单位" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.unit || ''} onChange={(e) => setSkuForm({ ...skuForm, unit: e.target.value })} />
+              <input type="text" placeholder="备注信息" className="w-full px-3 py-2 border rounded-lg text-xs" value={skuForm.remarks || ''} onChange={(e) => setSkuForm({ ...skuForm, remarks: e.target.value })} />
             </div>
             <div className="flex gap-3">
               <button onClick={() => { setIsAddingSku(false); setEditingSku(null); }} className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600">取消</button>
@@ -903,18 +964,18 @@ export default function App() {
       )}
 
       {/* 客户添加及编辑 */}
-      {(isAddingCustomer || editingCustomer) && (
+      {!!(isAddingCustomer || editingCustomer) && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-3 overflow-y-auto max-h-[90vh]">
             <h3 className="font-bold text-slate-800 text-base">{isAddingCustomer ? '登记新客户' : '修改客户档案'}</h3>
             <div className="space-y-3">
-              <input type="text" placeholder="客户名称/单位" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value, company: e.target.value })} />
-              <input type="text" placeholder="纳税人识别号/税号" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.taxId} onChange={(e) => setCustomerForm({ ...customerForm, taxId: e.target.value })} />
-              <input type="text" placeholder="注册/通信地址" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} />
-              <input type="text" placeholder="联系人" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.contact} onChange={(e) => setCustomerForm({ ...customerForm, contact: e.target.value })} />
-              <input type="text" placeholder="开户银行" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.bank} onChange={(e) => setCustomerForm({ ...customerForm, bank: e.target.value })} />
-              <input type="text" placeholder="银行账号" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.account} onChange={(e) => setCustomerForm({ ...customerForm, account: e.target.value })} />
-              <input type="text" placeholder="联系电话" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} />
+              <input type="text" placeholder="客户名称/单位" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.name || ''} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value, company: e.target.value })} />
+              <input type="text" placeholder="纳税人识别号/税号" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.taxId || ''} onChange={(e) => setCustomerForm({ ...customerForm, taxId: e.target.value })} />
+              <input type="text" placeholder="注册/通信地址" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.address || ''} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} />
+              <input type="text" placeholder="联系人" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.contact || ''} onChange={(e) => setCustomerForm({ ...customerForm, contact: e.target.value })} />
+              <input type="text" placeholder="开户银行" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.bank || ''} onChange={(e) => setCustomerForm({ ...customerForm, bank: e.target.value })} />
+              <input type="text" placeholder="银行账号" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.account || ''} onChange={(e) => setCustomerForm({ ...customerForm, account: e.target.value })} />
+              <input type="text" placeholder="联系电话" className="w-full px-3 py-2 border rounded-lg text-xs" value={customerForm.phone || ''} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} />
             </div>
             <div className="flex gap-3">
               <button onClick={() => { setIsAddingCustomer(false); setEditingCustomer(null); }} className="flex-1 bg-slate-100 py-2.5 rounded-xl text-xs font-semibold text-slate-600">取消</button>
@@ -934,28 +995,28 @@ export default function App() {
       )}
 
       {/* 客户专属价格抽屉 */}
-      {viewingExclusivePrice && (
+      {!!viewingExclusivePrice && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 flex flex-col max-h-[85vh]">
-            <h3 className="font-bold text-slate-800 text-sm">🔑 {viewingExclusivePrice.name} - 专属货品价格</h3>
+            <h3 className="font-bold text-slate-800 text-sm">🔑 {viewingExclusivePrice.name || ''} - 专属货品价格</h3>
             <div className="flex-1 overflow-y-auto space-y-3">
               {skus.map(s => {
-                const isCustom = viewingExclusivePrice.exclusivePrices[s.id] !== undefined;
+                const isCustom = viewingExclusivePrice.exclusivePrices && viewingExclusivePrice.exclusivePrices[s.id] !== undefined;
                 const value = isCustom ? viewingExclusivePrice.exclusivePrices[s.id] : s.purchasePrice;
                 return (
                   <div key={s.id} className="flex items-center justify-between border-b pb-2 text-xs">
-                    <span className="truncate max-w-[150px] font-medium text-slate-700">{s.name}</span>
+                    <span className="truncate max-w-[150px] font-medium text-slate-700">{s.name || ''}</span>
                     <div className="flex items-center gap-2">
-                      <span className="text-slate-400">进价: ¥{s.purchasePrice}</span>
+                      <span className="text-slate-400">进价: ¥{s.purchasePrice || 0}</span>
                       <input
                         type="number"
                         className={`w-20 px-2 py-1 rounded text-right border ${isCustom ? 'border-red-400 bg-red-50 text-red-600 font-bold' : 'border-slate-200'}`}
-                        value={value}
+                        value={value || 0}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value) || 0;
                           const updated = customers.map(c => {
                             if (c.id === viewingExclusivePrice.id) {
-                              return { ...c, exclusivePrices: { ...c.exclusivePrices, [s.id]: val } };
+                              return { ...c, exclusivePrices: { ...(c.exclusivePrices || {}), [s.id]: val } };
                             }
                             return c;
                           });
@@ -976,7 +1037,7 @@ export default function App() {
       {/* ======================================================== */}
       {/* 核心单据和合同生成模块 (支持静默打印) */}
       {/* ======================================================== */}
-      {currentModal && (
+      {!!currentModal && (
         <div className="fixed inset-0 bg-white z-50 overflow-y-auto p-4 flex flex-col">
           {/* 编辑控制后台 */}
           <div className="no-print bg-slate-100 p-4 rounded-xl space-y-3 mb-6">
@@ -984,13 +1045,13 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div>
                 <label className="block text-[10px] text-slate-500">本方开单公司</label>
-                <input type="text" className="w-full p-2 border rounded" value={docMeta.ourCompany} onChange={(e) => setDocMeta({...docMeta, ourCompany: e.target.value})} />
+                <input type="text" className="w-full p-2 border rounded" value={docMeta.ourCompany || ''} onChange={(e) => setDocMeta({...docMeta, ourCompany: e.target.value})} />
               </div>
               <div>
                 <label className="block text-[10px] text-slate-500">目标合作客商</label>
-                <select className="w-full p-2 border rounded" value={docMeta.selectedCustomerId} onChange={(e) => setDocMeta({...docMeta, selectedCustomerId: e.target.value})}>
+                <select className="w-full p-2 border rounded" value={docMeta.selectedCustomerId || ''} onChange={(e) => setDocMeta({...docMeta, selectedCustomerId: e.target.value})}>
                   <option value="">-- 请选择关联客户 --</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name || ''}</option>)}
                 </select>
               </div>
             </div>
@@ -1011,12 +1072,12 @@ export default function App() {
             {currentModal === 'sales' && (
               <div className="space-y-6">
                 <div className="text-center">
-                  <h1 className="text-xl font-black tracking-widest">{docMeta.ourCompany} 销售单</h1>
+                  <h1 className="text-xl font-black tracking-widest">{docMeta.ourCompany || ''} 销售单</h1>
                   <p className="text-xs text-slate-400 mt-1">NO: SD-{Date.now().toString().slice(-6)}</p>
                 </div>
                 <div className="grid grid-cols-2 text-xs border-b pb-3 gap-y-1">
                   <div><strong>购货单位：</strong>{customers.find(c => c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</div>
-                  <div className="text-right"><strong>开单日期：</strong>{docMeta.date}</div>
+                  <div className="text-right"><strong>开单日期：</strong>{docMeta.date || ''}</div>
                 </div>
                 <table className="w-full text-xs text-left border-collapse">
                   <thead>
@@ -1030,13 +1091,13 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {docMeta.items.map((item, idx) => (
+                    {(docMeta.items || []).map((item, idx) => (
                       <tr key={idx} className="border-b">
-                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 focus:bg-white" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
-                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 w-10" value={item.unit} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-1"><input type="number" className="w-full bg-slate-50 border-0 text-center w-12" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-1"><input type="number" className="w-full bg-slate-50 border-0 text-right w-16" value={item.unitPrice} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 focus:bg-white" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
+                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-1"><input type="text" className="w-full bg-slate-50 border-0 w-10" value={item.unit || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-1"><input type="number" className="w-full bg-slate-50 border-0 text-center w-12" value={item.qty || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-1"><input type="number" className="w-full bg-slate-50 border-0 text-right w-16" value={item.unitPrice || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
                         <td className="p-2 text-right font-bold text-slate-800">¥{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     ))}
@@ -1049,14 +1110,14 @@ export default function App() {
             {currentModal === 'quote' && (
               <div className="space-y-6">
                 <div className="text-center border-b-2 border-red-600 pb-3">
-                  <h1 className="text-2xl font-black text-red-600">{docMeta.ourCompany} 报价单</h1>
+                  <h1 className="text-2xl font-black text-red-600">{docMeta.ourCompany || ''} 报价单</h1>
                   <p className="text-xs text-slate-500 mt-1">专业消防系统集成与设备一站式供应商</p>
                 </div>
                 <div className="grid grid-cols-2 text-xs gap-y-2 leading-relaxed">
                   <div><strong>致客户：</strong>{customers.find(c => c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</div>
                   <div className="text-right"><strong>报价单号：</strong>QD-{Date.now().toString().slice(-6)}</div>
                   <div><strong>联系人：</strong>{customers.find(c => c.id === docMeta.selectedCustomerId)?.contact || '-'}</div>
-                  <div className="text-right"><strong>报价日期：</strong>{docMeta.date}</div>
+                  <div className="text-right"><strong>报价日期：</strong>{docMeta.date || ''}</div>
                 </div>
                 <table className="w-full text-xs text-left border border-slate-300">
                   <thead>
@@ -1069,12 +1130,12 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {docMeta.items.map((item, idx) => (
+                    {(docMeta.items || []).map((item, idx) => (
                       <tr key={idx} className="border-b">
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none text-slate-500" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r text-center"><input type="number" className="w-12 border-0 text-center focus:outline-none" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r text-right"><input type="number" className="w-16 border-0 text-right focus:outline-none" value={item.unitPrice} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none text-slate-500" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-center"><input type="number" className="w-12 border-0 text-center focus:outline-none" value={item.qty || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-right"><input type="number" className="w-16 border-0 text-right focus:outline-none" value={item.unitPrice || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
                         <td className="p-2 text-right font-bold">¥{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     ))}
@@ -1091,7 +1152,7 @@ export default function App() {
                 </div>
                 <div>
                   <p><strong>买方 (甲方)：</strong>{customers.find(c => c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</p>
-                  <p><strong>卖方 (乙方)：</strong>{docMeta.ourCompany}</p>
+                  <p><strong>卖方 (乙方)：</strong>{docMeta.ourCompany || ''}</p>
                 </div>
                 <table className="w-full text-[10px] text-left border border-slate-300">
                   <thead className="bg-slate-100 border-b border-slate-300">
@@ -1105,13 +1166,13 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {docMeta.items.map((item, idx) => (
+                    {(docMeta.items || []).map((item, idx) => (
                       <tr key={idx} className="border-b">
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.brand} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.unit} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r text-center"><input type="number" className="w-10 border-0 text-center" value={item.qty} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r text-right"><input type="number" className="w-14 border-0 text-right" value={item.unitPrice} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.unit || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-center"><input type="number" className="w-10 border-0 text-center" value={item.qty || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].qty = parseInt(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
+                        <td className="p-2 border-r text-right"><input type="number" className="w-14 border-0 text-right" value={item.unitPrice || 0} onChange={(e) => { const its = [...docMeta.items]; its[idx].unitPrice = parseFloat(e.target.value) || 0; its[idx].amount = its[idx].qty * its[idx].unitPrice; setDocMeta({...docMeta, items: its}); }} /></td>
                         <td className="p-2 text-right font-semibold">¥{(item.amount || 0).toFixed(2)}</td>
                       </tr>
                     ))}
@@ -1129,12 +1190,19 @@ export default function App() {
                   </div>
                   <div className="space-y-1 pl-2">
                     <p className="font-bold">乙方 (卖方)：</p>
-                    <p>公司：{docMeta.ourCompany}</p>
+                    <p>公司：{docMeta.ourCompany || ''}</p>
                   </div>
                 </div>
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* 核心通知组件 */}
+      {!!toast.show && (
+        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm text-white font-medium animate-bounce ${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
+          {toast.message}
         </div>
       )}
 
