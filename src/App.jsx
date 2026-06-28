@@ -5,19 +5,19 @@ import React, { useState, useEffect, useMemo } from 'react';
 // ==========================================
 const SYSTEM_LOGS = [
   { 
+    version: "v1.2.5", 
+    date: "2026-06-28", 
+    desc: "优化备份机制，采用 text/plain 绕过 OPTIONS 预检，修复谷歌备份；重构 Toast 采用高对比度深色背景提升可读性。" 
+  },
+  { 
     version: "v1.2.4", 
     date: "2026-06-28", 
     desc: "导入引擎算法升级。支持无表头统计学智能匹配、中文逗号与纯空格切分，完美兼容Excel直接复制。" 
   },
   { 
-    version: "v1.2.3", 
-    date: "2026-06-28", 
-    desc: "极致折行重构。将所有超长 JSX 标签及内联函数重组为多行垂直排列，防止粘贴截断。" 
-  },
-  { 
     version: "v1.2.2", 
     date: "2026-06-28", 
-    desc: "稳定性重构。将所有 React Hook 规范置于顶部，规避组件热重载硬伤。" 
+    desc: "稳定性重构。将所有 React Hook 规范置于顶部，规避组件热重载硬伤；全面加固本地缓存防御。" 
   }
 ];
 
@@ -25,7 +25,6 @@ export default function App() {
   // ==========================================
   // 1. 全局状态声明 (统一归置于顶部)
   // ==========================================
-  
   const [accounts, setAccounts] = useState(() => {
     try {
       const data = localStorage.getItem('crm_accounts');
@@ -295,11 +294,8 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // ==========================================
-  // 超强宽容度的智能自适应导入解析函数 [2]
-  // ==========================================
   const handleCSVImport = (text, type) => {
-    const lines = text.split(/\r?\n/)
+    const lines = text.split(/\\r?\\n/)
       .map(l => l.trim())
       .filter(l => l.length > 0);
 
@@ -308,21 +304,19 @@ export default function App() {
       return;
     }
 
-    // 1. 行切分函数：智能猜测当前行最合理的分隔符
     const parseLineIntelligently = (line) => {
       let sep = null;
-      if (line.includes('\t')) sep = '\t';
+      if (line.includes('\\t')) sep = '\\t';
       else if (line.includes('|')) sep = '|';
       else if (line.includes(';')) sep = ';';
       else if (line.includes(',')) sep = ',';
-      else if (line.includes('，')) sep = '，'; // 智能兼容中文逗号
+      else if (line.includes('，')) sep = '，';
 
       let cols = [];
       if (sep) {
         cols = line.split(sep);
       } else {
-        // 无明确分隔符，直接尝试按空格切分 (兼容复制纯空白间隔)
-        cols = line.split(/\s+/);
+        cols = line.split(/\\s+/);
       }
 
       return cols.map(c => {
@@ -338,16 +332,12 @@ export default function App() {
     const parsedLines = lines.map(parseLineIntelligently);
     const firstLine = parsedLines[0];
 
-    // ==========================================
-    // 规则 A：商品 SKU 智能识别与自适应导入 [2]
-    // ==========================================
     if (type === 'sku') {
       const skuKeywords = ['名', 'sku', '商品', '品名', '价格', '单价', '进价', '金额', '进货价', '品牌', '单位', '备注', 'name', 'price', 'brand', 'unit', 'remarks'];
       let hasHeader = firstLine.some(cell => 
         skuKeywords.some(kw => String(cell || '').toLowerCase().includes(kw))
       );
 
-      // 安全校验：如果首行第二列是纯数字，代表根本没有表头，强制设为 False
       if (firstLine[1] !== undefined && !isNaN(parseFloat(firstLine[1])) && isFinite(firstLine[1])) {
         hasHeader = false;
       }
@@ -366,8 +356,6 @@ export default function App() {
           else if (val.includes('备') || val.includes('注') || val.includes('remark')) colMap.remarks = idx;
         });
       } else {
-        // 无表头：统计学特征智能定位
-        // 扫描前5行，看哪一列能够被顺利转换为正数，将其定为“进价列”
         const scanRows = parsedLines.slice(0, 5);
         let colScores = {};
         scanRows.forEach(row => {
@@ -396,11 +384,10 @@ export default function App() {
           colMap.price = 1;
         }
 
-        // 剩余列分配给品牌、单位
         let assigned = [colMap.name, colMap.price];
         let remaining = [];
         let maxCols = 0;
-        scanRows.forEach(r => { if (row => row.length > maxCols) maxCols = r.length; });
+        scanRows.forEach(r => { if (r.length > maxCols) maxCols = r.length; });
         for (let i = 0; i < maxCols; i++) {
           if (!assigned.includes(i)) remaining.push(i);
         }
@@ -450,13 +437,8 @@ export default function App() {
       });
 
       setSkus(prev => [...prev, ...newSkus]);
-      triggerToast(`成功智能解析导入 ${newSkus.length} 条消防物资`);
-    }
-
-    // ==========================================
-    // 规则 B：客户名单智能导入
-    // ==========================================
-    else if (type === 'customer') {
+      triggerToast(`成功智能解析导入 \${newSkus.length} 条消防物资`);
+    } else if (type === 'customer') {
       const custKeywords = ['名', '公司', '客户', '单位', '税', '地', '址', '联系', '人', '账', '行', '电', '话', '手机', 'customer', 'company', 'name', 'tax', 'address', 'phone'];
       let hasHeader = firstLine.some(cell => 
         custKeywords.some(kw => String(cell || '').toLowerCase().includes(kw))
@@ -522,7 +504,7 @@ export default function App() {
       });
 
       setCustomers(prev => [...prev, ...newCusts]);
-      triggerToast(`成功智能解析导入 ${newCusts.length} 位客户数据`);
+      triggerToast(`成功智能解析导入 \${newCusts.length} 位客户数据`);
     }
   };
 
@@ -541,10 +523,10 @@ export default function App() {
     try {
       if (action === 'upload') {
         const payload = { skus, customers };
+        // 修改1: 为绕过谷歌无预检选项，Content-Type调整为 text/plain 规避 preflight [2]
         await fetch(sheetUrl, {
           method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'upload', payload })
         });
         triggerToast('本地数据已安全推送到云端备份！');
@@ -723,6 +705,9 @@ export default function App() {
     );
   }
 
+  // ==========================================
+  // 6. 主业务区渲染布局 (含各 Tab 及 Modal)
+  // ==========================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col shadow-xl relative pb-20 font-sans">
       <header className="bg-red-600 text-white p-4 sticky top-0 z-40 flex justify-between items-center shadow-md">
@@ -1488,101 +1473,4 @@ export default function App() {
                 </div>
                 <div>
                   <p><strong>买方 (甲方)：</strong>{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</p>
-                  <p><strong>卖方 (乙方)：</strong>{docMeta.ourCompany || ''}</p>
-                </div>
-                <table className="w-full text-[10px] text-left border border-slate-300">
-                  <thead className="bg-slate-100 border-b border-slate-300">
-                    <tr>
-                      <th className="p-2 border-r">货物名称</th>
-                      <th className="p-2 border-r">品牌</th>
-                      <th className="p-2 border-r">单位</th>
-                      <th className="p-2 border-r text-center">数量</th>
-                      <th className="p-2 border-r text-right">单价</th>
-                      <th className="p-2 text-right">金额</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(docMeta.items || []).map((item, idx) => (
-                      <tr key={idx} className="border-b">
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.unit || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r text-center">
-                          <input 
-                            type="number" 
-                            className="w-10 border-0 text-center" 
-                            value={item.qty || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].qty = parseInt(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 border-r text-right">
-                          <input 
-                            type="number" 
-                            className="w-14 border-0 text-right" 
-                            value={item.unitPrice || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 text-right font-semibold">¥{(item.amount || 0).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="text-right font-medium">
-                  <div>合同总额：¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
-                  {currentModal === 'contract-special' && <div className="text-[10px] text-slate-500">含 13% 专票税额</div>}
-                </div>
-                <div className="grid grid-cols-2 gap-4 border-t pt-4 text-[10px] leading-relaxed">
-                  <div className="space-y-1 border-r pr-2">
-                    <p className="font-bold">甲方 (买方)：</p>
-                    <p>税号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.taxId || '-'}</p>
-                    <p>账号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.account || '-'}</p>
-                  </div>
-                  <div className="space-y-1 pl-2">
-                    <p className="font-bold">乙方 (卖方)：</p>
-                    <p>公司：{docMeta.ourCompany || ''}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {!!toast.show && (
-        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm text-white font-medium animate-bounce \${toast.type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'}`}>
-          {toast.message}
-        </div>
-      )}
-
-      <footer className="no-print fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 z-40 flex h-16">
-        <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'home' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">🏠</span>
-          <span className="text-[10px] mt-0.5">首页</span>
-        </button>
-        <button onClick={() => setActiveTab('products')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'products' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">📦</span>
-          <span className="text-[10px] mt-0.5">商品</span>
-        </button>
-        <button onClick={() => setActiveTab('customers')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'customers' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">👥</span>
-          <span className="text-[10px] mt-0.5">客户</span>
-        </button>
-        <button onClick={() => setActiveTab('profile')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'profile' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">⚙️</span>
-          <span className="text-[10px] mt-0.5">我的</span>
-        </button>
-      </footer>
-    </div>
-  );
-}
+                  <p><strong>卖方
