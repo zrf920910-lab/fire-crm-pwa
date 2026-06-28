@@ -523,14 +523,17 @@ export default function App() {
     try {
       if (action === 'upload') {
         const payload = { skus, customers };
+        // 修改1: 强力兼容重定向并采用 text/plain 绕过 OPTIONS 预检，修复谷歌同步
         await fetch(sheetUrl, {
           method: 'POST',
+          redirect: 'follow', // 强制谷歌重定向跟踪
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'upload', payload })
         });
         triggerToast('本地数据已安全推送到云端备份！');
       } else if (action === 'download') {
-        const res = await fetch(sheetUrl);
+        // 强制跟踪谷歌 GET 重定向 302
+        const res = await fetch(sheetUrl, { redirect: 'follow' });
         const result = await res.json();
         if (result.success && result.data) {
           const cloudData = result.data;
