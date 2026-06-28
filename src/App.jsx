@@ -5,6 +5,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 // ==========================================
 const SYSTEM_LOGS = [
   { 
+    version: "v1.2.6", 
+    date: "2026-06-28", 
+    desc: "极致导入引擎加固。重构导入列特征分析，解决部分 Excel 复制行不齐时导致 read properties of undefined 的崩溃故障。" 
+  },
+  { 
     version: "v1.2.5", 
     date: "2026-06-28", 
     desc: "优化备份机制，采用 text/plain 绕过 OPTIONS 预检，修复谷歌备份；重构 Toast 采用高对比度深色背景提升可读性。" 
@@ -13,11 +18,6 @@ const SYSTEM_LOGS = [
     version: "v1.2.4", 
     date: "2026-06-28", 
     desc: "导入引擎算法升级。支持无表头统计学智能匹配、中文逗号与纯空格切分，完美兼容Excel直接复制。" 
-  },
-  { 
-    version: "v1.2.2", 
-    date: "2026-06-28", 
-    desc: "稳定性重构。将所有 React Hook 规范置于顶部，规避组件热重载硬伤；全面加固本地缓存防御。" 
   }
 ];
 
@@ -294,6 +294,9 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  // ==========================================
+  // 智能且具备防崩溃层（safeGet）的 CSV/TSV 导入解析函数
+  // ==========================================
   const handleCSVImport = (text, type) => {
     const lines = text.split(/\\r?\\n/)
       .map(l => l.trim())
@@ -303,6 +306,13 @@ export default function App() {
       triggerToast('未检测到任何输入内容', 'error');
       return;
     }
+
+    // 智能提取单元格函数，防止越界或空指针导致的解析崩溃 [2]
+    const safeGet = (arr, idx, fallback = '') => {
+      return (idx !== undefined && idx !== -1 && arr && arr[idx] !== undefined)
+        ? String(arr[idx]).trim()
+        : fallback;
+    };
 
     const parseLineIntelligently = (line) => {
       let sep = null;
@@ -332,6 +342,9 @@ export default function App() {
     const parsedLines = lines.map(parseLineIntelligently);
     const firstLine = parsedLines[0];
 
+    // ==========================================
+    // SKU 智能分析导入
+    // ==========================================
     if (type === 'sku') {
       const skuKeywords = ['名', 'sku', '商品', '品名', '价格', '单价', '进价', '金额', '进货价', '品牌', '单位', '备注', 'name', 'price', 'brand', 'unit', 'remarks'];
       let hasHeader = firstLine.some(cell => 
@@ -356,6 +369,7 @@ export default function App() {
           else if (val.includes('备') || val.includes('注') || val.includes('remark')) colMap.remarks = idx;
         });
       } else {
+        // 无表头智能分析
         const scanRows = parsedLines.slice(0, 5);
         let colScores = {};
         scanRows.forEach(row => {
@@ -387,7 +401,14 @@ export default function App() {
         let assigned = [colMap.name, colMap.price];
         let remaining = [];
         let maxCols = 0;
-        scanRows.forEach(r => { if (r.length > maxCols) maxCols = r.length; });
+        
+        // 修复 maxCols 迭代取值 bug (防止行长度变动引起列索引越界)
+        scanRows.forEach(r => { 
+          if (r && r.length > maxCols) {
+            maxCols = r.length;
+          } 
+        });
+        
         for (let i = 0; i < maxCols; i++) {
           if (!assigned.includes(i)) remaining.push(i);
         }
@@ -397,7 +418,7 @@ export default function App() {
         remaining.forEach(idx => {
           let totalLen = 0, count = 0, isShortUnit = true;
           scanRows.forEach(r => {
-            if (r[idx]) {
+            if (r && r[idx]) {
               totalLen += r[idx].length;
               count++;
               if (r[idx].length > 3) isShortUnit = false;
@@ -417,14 +438,15 @@ export default function App() {
 
       const newSkus = [];
       dataLines.forEach(cols => {
-        const name = cols[colMap.name];
-        if (!name || name.trim() === '') return;
+        // 利用 safeGet 精准防御 undefined 异常，安全解析每一个字段 [2]
+        const name = safeGet(cols, colMap.name);
+        if (!name) return;
 
-        const priceVal = colMap.price !== -1 ? cols[colMap.price] : '';
+        const priceVal = safeGet(cols, colMap.price);
         const price = parseFloat(priceVal) || 0;
-        const brand = (colMap.brand !== -1 && cols[colMap.brand]) ? cols[colMap.brand] : '通用';
-        const unit = (colMap.unit !== -1 && cols[colMap.unit]) ? cols[colMap.unit] : '个';
-        const remarks = (colMap.remarks !== -1 && cols[colMap.remarks]) ? cols[colMap.remarks] : '';
+        const brand = safeGet(cols, colMap.brand, '通用');
+        const unit = safeGet(cols, colMap.unit, '个');
+        const remarks = safeGet(cols, colMap.remarks, '');
 
         newSkus.push({
           id: 'sku_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -438,7 +460,12 @@ export default function App() {
 
       setSkus(prev => [...prev, ...newSkus]);
       triggerToast(`成功智能解析导入 \${newSkus.length} 条消防物资`);
-    } else if (type === 'customer') {
+    } 
+
+    // ==========================================
+    // 客户档案智能分析导入
+    // ==========================================
+    else if (type === 'customer') {
       const custKeywords = ['名', '公司', '客户', '单位', '税', '地', '址', '联系', '人', '账', '行', '电', '话', '手机', 'customer', 'company', 'name', 'tax', 'address', 'phone'];
       let hasHeader = firstLine.some(cell => 
         custKeywords.some(kw => String(cell || '').toLowerCase().includes(kw))
@@ -469,7 +496,7 @@ export default function App() {
         colMap.name = 0;
         colMap.company = 0;
         for (let i = 1; i < firstLine.length; i++) {
-          const val = firstLine[i];
+          const val = firstLine[i] ? String(firstLine[i]).trim() : '';
           if (/^\d{11}$/.test(val) || (/^\d+-\d+$/.test(val))) colMap.phone = i;
           else if (val.length >= 15 && val.length <= 20 && /^[a-zA-Z0-9]+$/.test(val)) colMap.taxId = i;
           else if (val.includes('省') || val.includes('市') || val.includes('区') || val.includes('路') || val.includes('号')) colMap.address = i;
@@ -486,19 +513,19 @@ export default function App() {
 
       const newCusts = [];
       dataLines.forEach(cols => {
-        const name = cols[colMap.name];
-        if (!name || name.trim() === '') return;
+        const name = safeGet(cols, colMap.name);
+        if (!name) return;
 
         newCusts.push({
           id: 'cust_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-          name: name.trim(),
-          company: (colMap.company !== -1 && cols[colMap.company]) ? cols[colMap.company].trim() : name.trim(),
-          taxId: (colMap.taxId !== -1 && cols[colMap.taxId]) ? cols[colMap.taxId].trim() : '',
-          address: (colMap.address !== -1 && cols[colMap.address]) ? cols[colMap.address].trim() : '',
-          contact: (colMap.contact !== -1 && cols[colMap.contact]) ? cols[colMap.contact].trim() : '',
-          account: (colMap.account !== -1 && cols[colMap.account]) ? cols[colMap.account].trim() : '',
-          bank: (colMap.bank !== -1 && cols[colMap.bank]) ? cols[colMap.bank].trim() : '',
-          phone: (colMap.phone !== -1 && cols[colMap.phone]) ? cols[colMap.phone].trim() : '',
+          name: name,
+          company: safeGet(cols, colMap.company, name),
+          taxId: safeGet(cols, colMap.taxId),
+          address: safeGet(cols, colMap.address),
+          contact: safeGet(cols, colMap.contact),
+          account: safeGet(cols, colMap.account),
+          bank: safeGet(cols, colMap.bank),
+          phone: safeGet(cols, colMap.phone),
           exclusivePrices: {}
         });
       });
@@ -523,16 +550,14 @@ export default function App() {
     try {
       if (action === 'upload') {
         const payload = { skus, customers };
-        // 修改1: 强力兼容重定向并采用 text/plain 绕过 OPTIONS 预检，修复谷歌同步
         await fetch(sheetUrl, {
           method: 'POST',
-          redirect: 'follow', // 强制谷歌重定向跟踪
+          redirect: 'follow',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'upload', payload })
         });
         triggerToast('本地数据已安全推送到云端备份！');
       } else if (action === 'download') {
-        // 强制跟踪谷歌 GET 重定向 302
         const res = await fetch(sheetUrl, { redirect: 'follow' });
         const result = await res.json();
         if (result.success && result.data) {
@@ -631,9 +656,6 @@ export default function App() {
     triggerToast('销售单保存成功，缺失的商品及客商专属价格已反向同步更新！');
   };
 
-  // ==========================================
-  // 5. 首次加载未登录时返回的登录门户
-  // ==========================================
   if (!currentUsername) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col justify-center p-6 font-sans">
@@ -1227,360 +1249,4 @@ export default function App() {
                       <span className="text-slate-400">进价: ¥{s.purchasePrice || 0}</span>
                       <input
                         type="number"
-                        className={`w-20 px-2 py-1 rounded text-right border \${isCustom ? 'border-red-400 bg-red-50 text-red-600 font-bold' : 'border-slate-200'}`}
-                        value={value || 0}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          const updated = customers.map(c => {
-                            if (c.id === viewingExclusivePrice.id) {
-                              return { ...c, exclusivePrices: { ...(c.exclusivePrices || {}), [s.id]: val } };
-                            }
-                            return c;
-                          });
-                          setCustomers(updated);
-                          setViewingExclusivePrice(updated.find(c => c.id === viewingExclusivePrice.id));
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <button 
-              onClick={() => setViewingExclusivePrice(null)} 
-              className="w-full bg-red-600 text-white py-2.5 rounded-xl text-xs font-semibold"
-            >
-              确认关闭
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!!currentModal && (
-        <div className="fixed inset-0 bg-white z-50 overflow-y-auto p-4 flex flex-col">
-          <div className="no-print bg-slate-100 p-4 rounded-xl space-y-3 mb-6">
-            <h3 className="font-bold text-slate-800 text-xs">⚙️ 实时合同及开单控制面板</h3>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <label className="block text-[10px] text-slate-500">本方开单公司</label>
-                <input 
-                  type="text" 
-                  className="w-full p-2 border rounded" 
-                  value={docMeta.ourCompany || ''} 
-                  onChange={(e) => setDocMeta({...docMeta, ourCompany: e.target.value})} 
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-slate-500">目标合作客商</label>
-                <select 
-                  className="w-full p-2 border rounded" 
-                  value={docMeta.selectedCustomerId || ''} 
-                  onChange={(e) => setDocMeta({...docMeta, selectedCustomerId: e.target.value})}
-                >
-                  <option value="">-- 请选择关联客户 --</option>
-                  {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name || ''}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-between items-center text-xs">
-              <button onClick={() => {
-                const updatedItems = [...docMeta.items, { skuName: '', brand: '通用', unit: '个', qty: 1, unitPrice: 0, amount: 0, remarks: '' }];
-                setDocMeta({...docMeta, items: updatedItems});
-              }} className="bg-red-600 text-white py-1 px-3 rounded text-[10px]">+ 添加新物料行</button>
-              <div className="flex gap-2">
-                <button onClick={() => setCurrentModal(null)} className="bg-slate-300 px-3 py-1 rounded text-[10px]">退出预览</button>
-                <button onClick={saveFormAndTriggerUpdates} className="bg-emerald-600 text-white px-3 py-1 rounded text-[10px]">确认存单并同步</button>
-                <button onClick={() => window.print()} className="bg-sky-600 text-white px-3 py-1 rounded text-[10px]">🖨️ 打印PDF / 纸张</button>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 border p-6 bg-white shadow-inner text-slate-900 rounded-lg max-w-4xl mx-auto w-full">
-            {currentModal === 'sales' && (
-              <div className="space-y-6">
-                <div className="text-center">
-                  <h1 className="text-xl font-black tracking-widest">{docMeta.ourCompany || ''} 销售单</h1>
-                  <p className="text-xs text-slate-400 mt-1">NO: SD-{Date.now().toString().slice(-6)}</p>
-                </div>
-                <div className="grid grid-cols-2 text-xs border-b pb-3 gap-y-1">
-                  <div><strong>购货单位：</strong>{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</div>
-                  <div className="text-right"><strong>开单日期：</strong>{docMeta.date || ''}</div>
-                </div>
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100 border-b">
-                      <th className="p-2">货品/服务名称</th>
-                      <th className="p-2">品牌</th>
-                      <th className="p-2">单位</th>
-                      <th className="p-2 text-center">数量</th>
-                      <th className="p-2 text-right">单价</th>
-                      <th className="p-2 text-right">总额</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(docMeta.items || []).map((item, idx) => (
-                      <tr key={idx} className="border-b">
-                        <td className="p-1">
-                          <input 
-                            type="text" 
-                            className="w-full bg-slate-50 border-0 focus:bg-white" 
-                            value={item.skuName || ''} 
-                            onChange={(e) => updateDocItemSku(idx, e.target.value)} 
-                          />
-                        </td>
-                        <td className="p-1">
-                          <input 
-                            type="text" 
-                            className="w-full bg-slate-50 border-0" 
-                            value={item.brand || ''} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].brand = e.target.value; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-1">
-                          <input 
-                            type="text" 
-                            className="w-full bg-slate-50 border-0 w-10" 
-                            value={item.unit || ''} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].unit = e.target.value; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-1">
-                          <input 
-                            type="number" 
-                            className="w-full bg-slate-50 border-0 text-center w-12" 
-                            value={item.qty || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].qty = parseInt(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-1">
-                          <input 
-                            type="number" 
-                            className="w-full bg-slate-50 border-0 text-right w-16" 
-                            value={item.unitPrice || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 text-right font-bold text-slate-800">¥{(item.amount || 0).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="text-right font-bold text-sm">
-                  合计总额: ¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}
-                </div>
-              </div>
-            )}
-
-            {currentModal === 'quote' && (
-              <div className="space-y-6">
-                <div className="text-center border-b-2 border-red-600 pb-3">
-                  <h1 className="text-2xl font-black text-red-600">{docMeta.ourCompany || ''} 报价单</h1>
-                  <p className="text-xs text-slate-500 mt-1">专业消防系统集成与设备一站式供应商</p>
-                </div>
-                <div className="grid grid-cols-2 text-xs gap-y-2 leading-relaxed">
-                  <div><strong>致客户：</strong>{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</div>
-                  <div className="text-right"><strong>报价单号：</strong>QD-{Date.now().toString().slice(-6)}</div>
-                  <div><strong>联系人：</strong>{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.contact || '-'}</div>
-                  <div className="text-right"><strong>报价日期：</strong>{docMeta.date || ''}</div>
-                </div>
-                <table className="w-full text-xs text-left border border-slate-300">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-300 font-bold">
-                      <th className="p-2 border-r">项目名称</th>
-                      <th className="p-2 border-r">品牌规格</th>
-                      <th className="p-2 border-r text-center">数量</th>
-                      <th className="p-2 border-r text-right">单价</th>
-                      <th className="p-2 text-right">小计</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(docMeta.items || []).map((item, idx) => (
-                      <tr key={idx} className="border-b">
-                        <td className="p-2 border-r">
-                          <input 
-                            type="text" 
-                            className="w-full border-0 focus:outline-none" 
-                            value={item.skuName || ''} 
-                            onChange={(e) => updateDocItemSku(idx, e.target.value)} 
-                          />
-                        </td>
-                        <td className="p-2 border-r">
-                          <input 
-                            type="text" 
-                            className="w-full border-0 focus:outline-none text-slate-500" 
-                            value={item.brand || ''} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].brand = e.target.value; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 border-r text-center">
-                          <input 
-                            type="number" 
-                            className="w-12 border-0 text-center focus:outline-none" 
-                            value={item.qty || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].qty = parseInt(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 border-r text-right">
-                          <input 
-                            type="number" 
-                            className="w-16 border-0 text-right focus:outline-none" 
-                            value={item.unitPrice || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 text-right font-bold">¥{(item.amount || 0).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="text-right text-sm font-black text-red-600">最终总额: ¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
-              </div>
-            )}
-
-            {(currentModal === 'contract-general' || currentModal === 'contract-special' || currentModal === 'contract') && (
-              <div className="space-y-6 text-xs text-slate-800 leading-relaxed">
-                <div className="text-center">
-                  <h1 className="text-xl font-bold">物资采购合同（{currentModal === 'contract-special' ? '增值税专票13%' : '普通发票'}）</h1>
-                </div>
-                <div>
-                  <p><strong>买方 (甲方)：</strong>{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.name || '未选择客户'}</p>
-                  <p><strong>卖方 (乙方)：</strong>{docMeta.ourCompany || ''}</p>
-                </div>
-                <table className="w-full text-[10px] text-left border border-slate-300">
-                  <thead className="bg-slate-100 border-b border-slate-300">
-                    <tr>
-                      <th className="p-2 border-r">货物名称</th>
-                      <th className="p-2 border-r">品牌</th>
-                      <th className="p-2 border-r">单位</th>
-                      <th className="p-2 border-r text-center">数量</th>
-                      <th className="p-2 border-r text-right">单价</th>
-                      <th className="p-2 text-right">金额</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(docMeta.items || []).map((item, idx) => (
-                      <tr key={idx} className="border-b">
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.skuName || ''} onChange={(e) => updateDocItemSku(idx, e.target.value)} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.brand || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].brand = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r"><input type="text" className="w-full border-0 focus:outline-none" value={item.unit || ''} onChange={(e) => { const its = [...docMeta.items]; its[idx].unit = e.target.value; setDocMeta({...docMeta, items: its}); }} /></td>
-                        <td className="p-2 border-r text-center">
-                          <input 
-                            type="number" 
-                            className="w-10 border-0 text-center" 
-                            value={item.qty || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].qty = parseInt(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 border-r text-right">
-                          <input 
-                            type="number" 
-                            className="w-14 border-0 text-right" 
-                            value={item.unitPrice || 0} 
-                            onChange={(e) => { 
-                              const its = [...docMeta.items]; 
-                              its[idx].unitPrice = parseFloat(e.target.value) || 0; 
-                              its[idx].amount = its[idx].qty * its[idx].unitPrice; 
-                              setDocMeta({...docMeta, items: its}); 
-                            }} 
-                          />
-                        </td>
-                        <td className="p-2 text-right font-semibold">¥{(item.amount || 0).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="text-right font-medium">
-                  <div>合同总额：¥{((docMeta && docMeta.items) || []).reduce((sum, item) => sum + (item.amount || 0), 0).toFixed(2)}</div>
-                  {currentModal === 'contract-special' && <div className="text-[10px] text-slate-500">含 13% 专票税额</div>}
-                </div>
-                <div className="grid grid-cols-2 gap-4 border-t pt-4 text-[10px] leading-relaxed">
-                  <div className="space-y-1 border-r pr-2">
-                    <p className="font-bold">甲方 (买方)：</p>
-                    <p>税号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.taxId || '-'}</p>
-                    <p>账号：{(customers || []).find(c => c && c.id === docMeta.selectedCustomerId)?.account || '-'}</p>
-                  </div>
-                  <div className="space-y-1 pl-2">
-                    <p className="font-bold">乙方 (卖方)：</p>
-                    <p>公司：{docMeta.ourCompany || ''}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 优化: 引入高对比度背景 Toast, 独立样式，提升可读性 */}
-      {!!toast.show && (
-        <div 
-          className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-2xl text-sm font-semibold flex items-center gap-2.5 animate-bounce"
-          style={{ 
-            backgroundColor: '#1e293b', 
-            color: '#ffffff', 
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.35), 0 10px 10px -5px rgba(0, 0, 0, 0.35)',
-            borderLeft: toast.type === 'error' ? '4px solid #ef4444' : '4px solid #10b981'
-          }}
-        >
-          <span>{toast.type === 'error' ? '❌' : '✨'}</span>
-          <span>{toast.message || ''}</span>
-        </div>
-      )}
-
-      <footer className="no-print fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 z-40 flex h-16">
-        <button onClick={() => setActiveTab('home')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'home' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">🏠</span>
-          <span className="text-[10px] mt-0.5">首页</span>
-        </button>
-        <button onClick={() => setActiveTab('products')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'products' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">📦</span>
-          <span className="text-[10px] mt-0.5">商品</span>
-        </button>
-        <button onClick={() => setActiveTab('customers')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'customers' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">👥</span>
-          <span className="text-[10px] mt-0.5">客户</span>
-        </button>
-        <button onClick={() => setActiveTab('profile')} className={`flex-1 flex flex-col items-center justify-center \${activeTab === 'profile' ? 'text-red-600' : 'text-slate-400'}`}>
-          <span className="text-xl">⚙️</span>
-          <span className="text-[10px] mt-0.5">我的</span>
-        </button>
-      </footer>
-    </div>
-  );
-}
+                        className={`w-20 px-2 py-1 rounded text
